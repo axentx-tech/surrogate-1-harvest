@@ -95,11 +95,14 @@ if [[ -n "$GH_TOKEN" ]]; then
     ln -sfn "$PROJECTS_DIR" ~/axentx
 
     # Clone axentx repos in background with hard timeout — never blocks boot
+    # Repos all live under github.com/arkashira/* (verified via api.github.com 2026-04-28)
     for repo_spec in \
-        "Costinel:AXENTX/Costinel" \
-        "Vanguard:AXENTX/vanguard" \
+        "Costinel:arkashira/Costinel" \
+        "vanguard:arkashira/vanguard" \
         "arkship:arkashira/arkship" \
-        "surrogate-1:AXENTX/surrogate-1"; do
+        "surrogate:arkashira/surrogate" \
+        "workio:arkashira/workio" \
+        "hermes-toolbelt:arkashira/hermes-toolbelt"; do
         local_name="${repo_spec%%:*}"
         gh_path="${repo_spec##*:}"
         target="${PROJECTS_DIR}/${local_name}"
