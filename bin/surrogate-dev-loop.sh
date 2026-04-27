@@ -33,7 +33,7 @@ SEARCH_ROOTS=(
 
 # ── Task generators (pick one per cycle, weighted random) ────────────────────
 pick_task() {
-    /usr/bin/python3 <<'PYEOF'
+    python3 <<'PYEOF'
 import os, random, re, subprocess, json
 from pathlib import Path
 
@@ -178,7 +178,7 @@ load_reflexion_lessons() {
     local kind="$1"
     local file="$HOME/.hermes/workspace/reflexion/lessons-${kind}.jsonl"
     [[ ! -f "$file" ]] && { echo ""; return; }
-    /usr/bin/python3 <<PYEOF
+    python3 <<PYEOF
 import json
 from pathlib import Path
 p = Path("$file")
@@ -211,7 +211,7 @@ save_reflexion_lesson() {
     mkdir -p "$(dirname "$file")"
     # Pass payload via env vars + sys.argv (safe — no shell quoting issues with embedded quotes)
     REFLEX_RESP="$response" REFLEX_TASK="$task" \
-        /usr/bin/python3 - "$kind" "$duration" "$file" <<'PYEOF'
+        python3 - "$kind" "$duration" "$file" <<'PYEOF'
 import json, re, os, sys
 from datetime import datetime
 kind, dur, out_file = sys.argv[1], int(sys.argv[2]), sys.argv[3]
@@ -251,11 +251,11 @@ run_cycle() {
     fi
 
     local kind path line task_text context
-    kind=$(echo "$task_json" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('kind',''))")
-    path=$(echo "$task_json" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('path',''))")
-    line=$(echo "$task_json" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('line',0))")
-    task_text=$(echo "$task_json" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('task',''))")
-    context=$(echo "$task_json" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('context',''))")
+    kind=$(echo "$task_json" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('kind',''))")
+    path=$(echo "$task_json" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('path',''))")
+    line=$(echo "$task_json" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('line',0))")
+    task_text=$(echo "$task_json" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('task',''))")
+    context=$(echo "$task_json" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('context',''))")
 
     local id="$(date +%s)-${kind}"
     local out="$OUT_DIR/${id}.md"
@@ -277,7 +277,7 @@ $context
 
     # Call Surrogate-1 via Ollama (keep_alive=5m so model stays warm between cycles)
     local body
-    body=$(PROMPT_VAR="$prompt" /usr/bin/python3 <<'PYEOF'
+    body=$(PROMPT_VAR="$prompt" python3 <<'PYEOF'
 import json, os
 print(json.dumps({
     "model": "surrogate-1",
@@ -290,13 +290,13 @@ print(json.dumps({
 PYEOF
 )
     local resp
-    resp=$(/usr/bin/curl -sS --max-time 120 \
+    resp=$(curl -sS --max-time 120 \
         http://localhost:11434/v1/chat/completions \
         -H 'Content-Type: application/json' \
         -d "$body" 2>/dev/null)
 
     local answer
-    answer=$(echo "$resp" | /usr/bin/python3 -c "
+    answer=$(echo "$resp" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -335,7 +335,7 @@ EOF
 
     # Append to training-data candidate (env vars + argv = safe quoting)
     DEV_TASK="$task_text" DEV_ANSWER="$answer" \
-        /usr/bin/python3 - "$kind" "$dur" <<'PYEOF'
+        python3 - "$kind" "$dur" <<'PYEOF'
 import json, os, sys
 from pathlib import Path
 from datetime import datetime

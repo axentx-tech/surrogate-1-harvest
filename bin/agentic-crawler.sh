@@ -40,7 +40,7 @@ SQL
 COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM frontier;")
 if [[ $COUNT -lt 5 ]]; then
     echo "[$(date +%H:%M:%S)] seeding frontier" | tee -a "$LOG"
-    /usr/bin/python3 - "$DB" <<'PYEOF'
+    python3 - "$DB" <<'PYEOF'
 import sqlite3, sys, time
 db = sys.argv[1]
 seeds = [
@@ -82,7 +82,7 @@ fi
 # ── Worker: fetch one URL, extract links, score, push back to frontier ─────
 fetch_one() {
     local url="$1" depth="$2"
-    /usr/bin/python3 - "$url" "$depth" "$DB" "$PAIRS" "${HF_TOKEN:-}" <<'PYEOF' 2>&1
+    python3 - "$url" "$depth" "$DB" "$PAIRS" "${HF_TOKEN:-}" <<'PYEOF' 2>&1
 import sys, sqlite3, urllib.request, urllib.parse, re, time, json, os
 url, depth, db, pairs, hf_token = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
 con = sqlite3.connect(db)

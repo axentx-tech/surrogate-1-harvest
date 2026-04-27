@@ -15,7 +15,7 @@ LOG="$HOME/.surrogate/logs/surrogate-consolidate.log"
 CHECKPOINT="$MEM/consolidate.checkpoint"
 mkdir -p "$(dirname "$LOG")" "$MEM"
 
-/usr/bin/python3 <<'PYEOF' 2>>"$LOG"
+python3 <<'PYEOF' 2>>"$LOG"
 import json, os, sqlite3, urllib.request, hashlib, subprocess
 from datetime import datetime
 from pathlib import Path

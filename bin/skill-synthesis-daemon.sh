@@ -32,13 +32,13 @@ while true; do
             -name "*.sh" -o -name "*.yaml" -o -name "*.toml" -o -name "*.json" \
         \) -size -50k -mtime -3 2>/dev/null | head -200 | while read -r f; do
             # Skip already-synthesized
-            HASH=$(/usr/bin/python3 -c "import hashlib; print(hashlib.md5(open('$f','rb').read()).hexdigest()[:12])" 2>/dev/null)
+            HASH=$(python3 -c "import hashlib; print(hashlib.md5(open('$f','rb').read()).hexdigest()[:12])" 2>/dev/null)
             [[ -z "$HASH" ]] && continue
             STAMP="$SKILLS_DIR/.synthesized/$HASH"
             [[ -f "$STAMP" ]] && continue
             mkdir -p "$(dirname "$STAMP")"
 
-            /usr/bin/python3 - "$f" "$SKILLS_DIR" "$PAIRS" "$STAMP" <<'PYEOF' 2>>"$LOG"
+            python3 - "$f" "$SKILLS_DIR" "$PAIRS" "$STAMP" <<'PYEOF' 2>>"$LOG"
 import sys, re, json, time, os, hashlib
 from pathlib import Path
 

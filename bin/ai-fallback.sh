@@ -45,17 +45,17 @@ while [ $# -gt 0 ]; do
     *)          QUERY="$QUERY $1"; shift ;;
   esac
 done
-QUERY=$(echo "$QUERY" | /usr/bin/sed 's/^ *//')
-[ -z "$QUERY" ] && { /usr/bin/head -15 "$0"; exit 1; }
+QUERY=$(echo "$QUERY" | sed 's/^ *//')
+[ -z "$QUERY" ] && { head -15 "$0"; exit 1; }
 
 # --task <type> — pick the strongest free model per provider for the task.
 # Sets per-provider env vars that try_* functions read (bridge --model alias).
 # Auto-detect if not provided: code keywords → coding, reasoning keywords → reasoning.
 if [ -z "$TASK" ]; then
   q_lower=$(echo "$QUERY" | /usr/bin/tr '[:upper:]' '[:lower:]')
-  if echo "$q_lower" | /usr/bin/grep -qE "code|function|implement|refactor|bug|class|method|api|sql|terraform|cloudformation|dockerfile|kubernetes|yaml|typescript|javascript|python|rust|golang"; then
+  if echo "$q_lower" | grep -qE "code|function|implement|refactor|bug|class|method|api|sql|terraform|cloudformation|dockerfile|kubernetes|yaml|typescript|javascript|python|rust|golang"; then
     TASK="coding"
-  elif echo "$q_lower" | /usr/bin/grep -qE "analyze|reason|explain why|compare|evaluate|architect|design|trade-?off|deep|think step|proof|calculate|complex"; then
+  elif echo "$q_lower" | grep -qE "analyze|reason|explain why|compare|evaluate|architect|design|trade-?off|deep|think step|proof|calculate|complex"; then
     TASK="reasoning"
   fi
 fi
@@ -100,7 +100,7 @@ if [[ "$TASK" == "coding" || "$TASK" == "reasoning" || "$TASK" == "creative" ]];
     if [[ -f "$HOME/.surrogate/embeddings.db" ]]; then
         EMB_COUNT=$(/usr/bin/sqlite3 "$HOME/.surrogate/embeddings.db" 'SELECT COUNT(*) FROM embeddings' 2>/dev/null || echo 0)
         if [[ "$EMB_COUNT" -ge 100 ]]; then
-            SEM_CONTEXT=$(/usr/bin/python3 "$HOME/.surrogate/bin/embed-doc.py" --query "$QUERY" 2>/dev/null | /usr/bin/head -15)
+            SEM_CONTEXT=$(python3 "$HOME/.surrogate/bin/embed-doc.py" --query "$QUERY" 2>/dev/null | head -15)
             if [[ -n "$SEM_CONTEXT" ]]; then
                 QUERY="=== RAG CONTEXT (top-5 semantic matches from knowledge base) ===
 $SEM_CONTEXT
@@ -124,13 +124,13 @@ save_response() {
 # --- System prompt from knowledge base + auto code-search if code query ---
 build_system_prompt() {
   local kb="" profile="" code_ctx="" q_lower
-  [ -f "$HOME/.surrogate/memory/knowledge_index.md" ] && kb="$(/usr/bin/head -50 $HOME/.surrogate/memory/knowledge_index.md)"
+  [ -f "$HOME/.surrogate/memory/knowledge_index.md" ] && kb="$(head -50 $HOME/.surrogate/memory/knowledge_index.md)"
   [ -f "$HOME/.surrogate/memory/user_profile.md" ] && profile="$(cat $HOME/.surrogate/memory/user_profile.md)"
 
   q_lower=$(echo "$QUERY" | /usr/bin/tr '[:upper:]' '[:lower:]')
   local is_generate=0 is_code=0
-  echo "$q_lower" | /usr/bin/grep -qE "code|function|implement|refactor|bug|error|class|method|api|endpoint|schema|model|service|controller|middleware|auth|database|query|sql|deploy|pipeline|terraform|cloudformation|dockerfile|kubernetes|helm|yaml" && is_code=1
-  echo "$q_lower" | /usr/bin/grep -qE "create|generate|write|build|new|template|scaffold|design" && is_generate=1
+  echo "$q_lower" | grep -qE "code|function|implement|refactor|bug|error|class|method|api|endpoint|schema|model|service|controller|middleware|auth|database|query|sql|deploy|pipeline|terraform|cloudformation|dockerfile|kubernetes|helm|yaml" && is_code=1
+  echo "$q_lower" | grep -qE "create|generate|write|build|new|template|scaffold|design" && is_generate=1
 
   if [ "$is_code" = "1" ] && [ -d "$HOME/.surrogate/code-vector-db" ]; then
     if [ "$is_generate" = "1" ] && [ -x "$HOME/.surrogate/bin/find-gold-examples.sh" ]; then
@@ -138,7 +138,7 @@ build_system_prompt() {
       code_ctx=$("$HOME/.surrogate/bin/find-gold-examples.sh" --top 2 --max-bytes 5000 "$QUERY" 2>/dev/null)
     elif [ -x "$HOME/.surrogate/bin/code-search.sh" ]; then
       # Query task → snippets only (faster)
-      code_ctx=$("$HOME/.surrogate/bin/code-search.sh" --top 3 "$QUERY" 2>/dev/null | /usr/bin/head -60)
+      code_ctx=$("$HOME/.surrogate/bin/code-search.sh" --top 3 "$QUERY" 2>/dev/null | head -60)
     fi
   fi
 
@@ -238,7 +238,7 @@ m = {'model':os.environ['ORM'],'max_tokens':4000,
 print(json.dumps(m))
 " 2>&1) || { log "  body-build failed: $body"; return 1; }
   local resp code body_resp
-  resp=$(/usr/bin/curl -sS -w "\n%{http_code}" \
+  resp=$(curl -sS -w "\n%{http_code}" \
     --max-time 90 \
     -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer $OPENROUTER_API_KEY" \
@@ -246,8 +246,8 @@ print(json.dumps(m))
     -H "X-Title: ai-fallback" \
     -H "content-type: application/json" \
     -d "$body" 2>&1)
-  code=$(echo "$resp" | /usr/bin/tail -1)
-  body_resp=$(echo "$resp" | /usr/bin/sed '$d')
+  code=$(echo "$resp" | tail -1)
+  body_resp=$(echo "$resp" | sed '$d')
   if [ "$code" != "200" ]; then
     # Log real error reason for debug
     local errmsg
@@ -284,11 +284,11 @@ m = {'systemInstruction':{'parts':[{'text':'''$SYSTEM'''}]},
 print(json.dumps(m))
 " 2>/dev/null)
   local resp code body_resp
-  resp=$(/usr/bin/curl -sS -w "\n%{http_code}" \
+  resp=$(curl -sS -w "\n%{http_code}" \
     -X POST "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$GEMINI_API_KEY" \
     -H "content-type: application/json" -d "$body" 2>&1)
-  code=$(echo "$resp" | /usr/bin/tail -1)
-  body_resp=$(echo "$resp" | /usr/bin/sed '$d')
+  code=$(echo "$resp" | tail -1)
+  body_resp=$(echo "$resp" | sed '$d')
   [ "$code" != "200" ] && { log "  [$code] falling through"; return 1; }
   local out
   out=$(echo "$body_resp" | "$HOME/.surrogate/venv/bin/python" -c "
@@ -361,7 +361,7 @@ try_cloudflare() {
 # gemma4:26b BLOCKED — user directive (too slow for this hw).
 try_granite() {
   # Check ollama running
-  /usr/bin/curl -sS --max-time 3 http://localhost:11434/api/tags > /dev/null 2>&1 || return 2
+  curl -sS --max-time 3 http://localhost:11434/api/tags > /dev/null 2>&1 || return 2
   local alias="${LOCAL_MODEL:-granite}"
   log "→ Local Ollama: $alias (free, always-on)"
   local out

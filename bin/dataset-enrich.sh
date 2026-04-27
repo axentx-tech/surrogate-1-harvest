@@ -17,13 +17,13 @@
 set -uo pipefail
 set -a; source "$HOME/.hermes/.env" 2>/dev/null; set +a
 
-LOG="$HOME/.surrogate/logs/dataset-enrich.log"
+LOG="$HOME/.claude/logs/dataset-enrich.log"
 WORK="$HOME/.hermes/workspace/dataset-enrich"
 mkdir -p "$WORK" "$(dirname "$LOG")"
 
 echo "[$(date +%H:%M:%S)] dataset enrich start" | tee "$LOG"
 
-~/.surrogate/venv/bin/python <<'PYEOF' 2>&1 | tee -a "$LOG"
+~/.claude/venv/bin/python <<'PYEOF' 2>&1 | tee -a "$LOG"
 from huggingface_hub import HfApi
 from pathlib import Path
 from datasets import load_dataset
@@ -36,19 +36,33 @@ api = HfApi()
 # (id, license, slug, schema_hint, per_dataset_cap)
 DATASETS = [
     # ── Coding instruction-tuning ────────────────────────────────────────────
-    ("ise-uiuc/Magicoder-OSS-Instruct-75K",   "MIT",     "magicoder-oss",        "instr-resp",   75000),
-    ("ise-uiuc/Magicoder-Evol-Instruct-110K", "Apache",  "magicoder-evol",       "instr-resp",  110000),
-    ("theblackcat102/evol-codealpaca-v1",     "Apache",  "evol-codealpaca",      "instr-resp",  100000),
-    # ── Multi-turn dialogue (helpful assistant style) ───────────────────────
-    ("HuggingFaceH4/ultrachat_200k",          "MIT",     "ultrachat",            "messages",    200000),
-    ("Open-Orca/SlimOrca-Dedup",              "MIT",     "slim-orca",            "conversations",150000),
-    # ── Real commits (code review / PR training) ────────────────────────────
-    ("bigcode/commitpackft",                  "MIT",     "commitpackft",         "commit",       80000),
+    ("ise-uiuc/Magicoder-OSS-Instruct-75K",         "MIT",         "magicoder-oss",       "instr-resp",            75000),
+    ("ise-uiuc/Magicoder-Evol-Instruct-110K",       "Apache",      "magicoder-evol",      "instr-resp",           110000),
+    ("theblackcat102/evol-codealpaca-v1",           "Apache",      "evol-codealpaca",     "instr-resp",           100000),
+    ("m-a-p/CodeFeedback-Filtered-Instruction",     "Apache",      "codefeedback-filt",   "query-resp",           100000),
+    ("m-a-p/Code-Feedback",                         "Apache",      "codefeedback-multi",  "messages",              66383),
+    ("QuixiAI/dolphin-coder",                       "Apache",      "dolphin-coder",       "system-question-resp", 100000),
+    # ── Multi-turn dialogue + agentic reasoning ─────────────────────────────
+    ("HuggingFaceH4/ultrachat_200k",                "MIT",         "ultrachat",           "messages",             200000),
+    ("Open-Orca/SlimOrca-Dedup",                    "MIT",         "slim-orca",           "conversations",        150000),
+    ("microsoft/orca-agentinstruct-1M-v1",          "CDLA",        "orca-agentinstruct",  "messages",             150000),
+    # ── Real commits + code review ──────────────────────────────────────────
+    ("bigcode/commitpackft",                        "MIT",         "commitpackft",        "commit",                80000),
+    ("VatsaDev/code-review",                        "MIT",         "vatsa-code-review",   "instr-resp",            40000),
+    # ── DevSecOps: CVE / CWE / vulnerability detection ──────────────────────
+    ("AlicanKiraz0/All-CVE-Records-Training-Dataset","Apache",     "cve-records-chat",    "system-user-assistant", 30000),
+    ("CyberNative/Code_Vulnerability_Security_DPO", "Apache",      "vuln-secure-dpo",     "dpo-question",           4656),
+    ("bstee615/diversevul",                         "MIT-research","diversevul-cwe",      "code-defect-cwe",       80000),
+    ("google/code_x_glue_cc_defect_detection",      "C-UDA",       "codexglue-defect",    "code-defect",           27318),
+    # ── Function/tool calling (agentic core) ────────────────────────────────
+    ("Salesforce/xlam-function-calling-60k",        "CC-BY-4.0",   "xlam-fc",             "tools-query-answers",   60000),
+    ("glaiveai/glaive-function-calling-v2",         "Apache",      "glaive-fc-v2",        "system-chat",          112960),
+    ("NousResearch/hermes-function-calling-v1",     "Apache",      "hermes-fc",           "conversations",         11578),
     # ── Reasoning / math ────────────────────────────────────────────────────
-    ("TIGER-Lab/MathInstruct",                "MIT",     "math-instruct",        "instr-resp",   60000),
-    ("meta-math/MetaMathQA",                  "MIT",     "metamath",             "query-resp",   50000),
+    ("TIGER-Lab/MathInstruct",                      "MIT",         "math-instruct",       "instr-resp",            60000),
+    ("meta-math/MetaMathQA",                        "MIT",         "metamath",            "query-resp",            50000),
     # ── Helpfulness preferences ─────────────────────────────────────────────
-    ("Anthropic/hh-rlhf",                     "MIT",     "hh-rlhf",              "chosen-rejected",40000),
+    ("Anthropic/hh-rlhf",                           "MIT",         "hh-rlhf",             "chosen-rejected",       40000),
 ]
 
 # 1. Existing axentx hashes for dedup
@@ -117,6 +131,32 @@ with open(out_path, "w") as out:
                 elif schema == "chosen-rejected":
                     prompt = str(row.get("chosen","")[:200] or row.get("prompt",""))
                     response = str(row.get("chosen",""))
+                elif schema == "system-user-assistant":   # AlicanKiraz0 CVE
+                    prompt = f"{str(row.get('System','')).strip()}\n\nUser: {str(row.get('User','')).strip()}"
+                    response = str(row.get("Assistant",""))
+                elif schema == "dpo-question":            # CyberNative DPO
+                    prompt = str(row.get("question",""))
+                    response = str(row.get("chosen",""))
+                elif schema == "code-defect-cwe":         # DiverseVul
+                    cwes = row.get("cwe") or []
+                    cwe_str = ",".join(cwes) if isinstance(cwes, list) and cwes else "none"
+                    label = "VULNERABLE" if row.get("target") == 1 else "SAFE"
+                    prompt = f"Audit this function for security vulnerabilities. Identify any CWE matches.\n```\n{str(row.get('func',''))[:6000]}\n```"
+                    response = f"Verdict: {label}\nCWE: {cwe_str}\nProject: {row.get('project','')}\nCommit: {str(row.get('message',''))[:500]}"
+                elif schema == "code-defect":             # CodeXGLUE
+                    label = "VULNERABLE" if row.get("target") else "SAFE"
+                    prompt = f"Review this C function for defects:\n```c\n{str(row.get('func',''))[:6000]}\n```"
+                    response = f"Defect detected: {label}\nProject: {row.get('project','')}\nCommit: {row.get('commit_id','')}"
+                elif schema == "tools-query-answers":     # xLAM
+                    tools_json = json.dumps(row.get("tools",[]))[:3000]
+                    prompt = f"You have access to these tools:\n{tools_json}\n\nUser query: {row.get('query','')}"
+                    response = json.dumps(row.get("answers",[]), ensure_ascii=False)
+                elif schema == "system-chat":             # Glaive-v2
+                    prompt = str(row.get("system",""))
+                    response = str(row.get("chat",""))
+                elif schema == "system-question-resp":    # dolphin-coder
+                    prompt = f"{str(row.get('system_prompt','')).strip()}\n\n{str(row.get('question','')).strip()}"
+                    response = str(row.get("response",""))
                 else:
                     continue
 

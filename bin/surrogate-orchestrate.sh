@@ -42,7 +42,7 @@ RESEARCH_CONTEXT=""
 RESEARCH_OUT="$WORKDIR/0-research-context.md"
 if echo "$TASK" | grep -iqE "migrat|integrat|switch from|move to|adopt|setup|deploy"; then
     echo "${MA}${B}═══ Stage 0/6: WEB RESEARCH${R} ${D}— gather current docs first${R}"
-    /usr/bin/python3 - "$TASK" "$RESEARCH_OUT" <<'PYEOF' 2>&1 | sed 's/^/  /' || true
+    python3 - "$TASK" "$RESEARCH_OUT" <<'PYEOF' 2>&1 | sed 's/^/  /' || true
 import sys, urllib.request, urllib.parse, json, re, os
 task, out_path = sys.argv[1], sys.argv[2]
 # Extract tech keywords (capitalized words, dot-versions, snake-case)
@@ -84,7 +84,7 @@ for prd_file in "$(pwd)/surrogate.md" "$(pwd)/SURROGATE.md"; do
         PRD_CONTEXT="
 
 === Project PRD (surrogate.md) ===
-$(/usr/bin/head -c 6000 "$prd_file")
+$(head -c 6000 "$prd_file")
 === End PRD ==="
         break
     fi
@@ -138,7 +138,7 @@ EOF
               CHUTES_KEY="${CHUTES_API_KEY:-}" \
               OR_KEY_ENV="${OPENROUTER_API_KEY:-}" \
               GH_POOL="${GITHUB_TOKEN_POOL:-}" \
-              /usr/bin/python3 - "$prompt_file" <<'PYEOF' 2>&1
+              python3 - "$prompt_file" <<'PYEOF' 2>&1
 import sys, json, urllib.request, os
 from pathlib import Path
 prompt = Path(sys.argv[1]).read_text()
@@ -249,7 +249,7 @@ PYEOF
 # ── Push every task pair to HF training dataset (background) ──
 push_training_pair() {
     local source="$1" prompt="$2" content="$3"
-    /usr/bin/python3 - "$source" "$prompt" "$content" "$TRAINING_LOG" <<'PYEOF' 2>/dev/null &
+    python3 - "$source" "$prompt" "$content" "$TRAINING_LOG" <<'PYEOF' 2>/dev/null &
 import sys, json, time, os
 src, p, c, log = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 pair = {
@@ -384,7 +384,7 @@ Task: $TASK
 # Extract code blocks from DEV output → write actual files
 if [[ -f "$DEV_OUT" ]]; then
     echo "${D}  Extracting code blocks → real files${R}"
-    /usr/bin/python3 - "$DEV_OUT" "$(pwd)" <<'PYEOF' 2>&1 | sed 's/^/    /'
+    python3 - "$DEV_OUT" "$(pwd)" <<'PYEOF' 2>&1 | sed 's/^/    /'
 import sys, re, os
 from pathlib import Path
 md_path, cwd = sys.argv[1], sys.argv[2]
@@ -420,7 +420,7 @@ fi
 QA_OUT="$WORKDIR/5-qa-verify.md"
 OPS_OUT="$WORKDIR/6a-ops-checklist.md"
 NEED_OPS=0
-if echo "$TASK" | /usr/bin/grep -iqE "deploy|docker|helm|k8s|terraform|cicd|ci/cd|cloudformation|buildspec|ecs|lambda"; then
+if echo "$TASK" | grep -iqE "deploy|docker|helm|k8s|terraform|cicd|ci/cd|cloudformation|buildspec|ecs|lambda"; then
     NEED_OPS=1
 fi
 
@@ -509,7 +509,7 @@ ls -la "$WORKDIR/" 2>&1 | tail -n +2 | awk '{printf "  %s  %s\n", $5, $9}' | gre
 
 VERDICT_TEXT=""
 if [[ -f "$REVIEW_OUT" ]]; then
-    VERDICT_TEXT=$(grep -iE "verdict|APPROVE|REWORK|REJECT" "$REVIEW_OUT" | /usr/bin/head -3)
+    VERDICT_TEXT=$(grep -iE "verdict|APPROVE|REWORK|REJECT" "$REVIEW_OUT" | head -3)
     echo ""
     echo "${B}▸ Final verdict:${R}"
     echo "$VERDICT_TEXT" | sed 's/^/  /'
@@ -536,5 +536,5 @@ if echo "$VERDICT_TEXT" | grep -qi "APPROVE"; then
 elif echo "$VERDICT_TEXT" | grep -qi "REWORK"; then
     echo ""
     echo "${YE}${B}▸ Reviewer requested REWORK — re-run orchestrate after addressing notes${R}"
-    grep -A5 -i "REWORK\|action item" "$REVIEW_OUT" | /usr/bin/head -10 | sed 's/^/  /'
+    grep -A5 -i "REWORK\|action item" "$REVIEW_OUT" | head -10 | sed 's/^/  /'
 fi

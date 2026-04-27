@@ -31,7 +31,7 @@ if command -v huggingface-cli >/dev/null 2>&1 && [[ -n "${HF_TOKEN:-}" ]]; then
         --commit-message "auto-orchestrate: +${NEW_LINES} pairs ($(date +%H:%M))" \
         --token "$HF_TOKEN" 2>&1 | tee -a "$LOG"
 else
-    /usr/bin/python3 - "$SLICE" "$NEW_LINES" "$DATE_TAG" <<'PYEOF' 2>&1 | tee -a "$LOG"
+    python3 - "$SLICE" "$NEW_LINES" "$DATE_TAG" <<'PYEOF' 2>&1 | tee -a "$LOG"
 import sys, os
 slice_path, n_pairs, date_tag = sys.argv[1], sys.argv[2], sys.argv[3]
 try:

@@ -206,7 +206,7 @@ run_agent() {
     export AGENT_EFFORT="$EFFORT"
     export AGENT_CWD="$(pwd)"
 
-    /usr/bin/python3 <<'PYEOF'
+    python3 <<'PYEOF'
 import os, sys, json, re, sqlite3, subprocess, urllib.request, urllib.error, time
 from datetime import datetime
 from pathlib import Path
@@ -278,7 +278,7 @@ def tool_glob(pattern, path=None):
 
 def tool_grep(pattern, path=None, glob='*'):
     base = os.path.expanduser(path) if path else CWD
-    cmd = f"/usr/bin/grep -rn --include='{glob}' -E {subprocess.list2cmdline([pattern])} {base} 2>/dev/null | head -40"
+    cmd = f"grep -rn --include='{glob}' -E {subprocess.list2cmdline([pattern])} {base} 2>/dev/null | head -40"
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
     return {'matches': r.stdout[:5000]}
 
@@ -505,7 +505,7 @@ print_statusline() {
         if [[ ! -f "$cache" ]] || [[ $(($(date +%s) - $(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache" 2>/dev/null || echo 0))) -gt 60 ]]; then
             (curl -sS -m 5 -H "Authorization: Bearer ${OPENROUTER_API_KEY:-${OR_KEY:-}}" \
                 https://openrouter.ai/api/v1/auth/key 2>/dev/null \
-                | /usr/bin/python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(f'\$OR={d.get(\"usage\",0):.3f}')" \
+                | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(f'\$OR={d.get(\"usage\",0):.3f}')" \
                 > "$cache") 2>/dev/null &
         fi
         cost_str=$(cat "$cache" 2>/dev/null | head -1)
@@ -523,7 +523,7 @@ HISTORY_FILE="$SURROGATE_HOME/history.jsonl"
 mkdir -p "$(dirname "$HISTORY_FILE")"
 save_history() {
     local prompt="$1"
-    /usr/bin/python3 -c "
+    python3 -c "
 import json, sys, time
 from pathlib import Path
 Path('$HISTORY_FILE').parent.mkdir(parents=True, exist_ok=True)
@@ -630,7 +630,7 @@ repl() {
                 ;;
             /history)
                 if [[ -f "$HISTORY_FILE" ]]; then
-                    /usr/bin/python3 -c "
+                    python3 -c "
 import json
 from pathlib import Path
 import time
@@ -661,7 +661,7 @@ for l in lines:
                 fi
                 ;;
             /cost)
-                bash -c 'source ~/.hermes/.env; curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/auth/key' 2>&1 | /usr/bin/python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(f'  OpenRouter: \${d.get(\"usage\",0):.4f}')"
+                bash -c 'source ~/.hermes/.env; curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/auth/key' 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(f'  OpenRouter: \${d.get(\"usage\",0):.4f}')"
                 ;;
             /cost-all) bash "$0" --status ;;
             /remote*)
@@ -739,7 +739,7 @@ init_project() {
     # ── Step A: web research the tech keywords (free, fast, grounds the PRD) ─
     echo "${MA}▶ Researching tech context...${R}"
     local research_md=""
-    research_md=$(/usr/bin/python3 - "$Q_STACK $Q_DESC $Q_FEATURES" <<'PYEOF' 2>/dev/null
+    research_md=$(python3 - "$Q_STACK $Q_DESC $Q_FEATURES" <<'PYEOF' 2>/dev/null
 import sys, urllib.request, urllib.parse, re
 text = sys.argv[1]
 # Extract candidate tech keywords (CamelCase, lowercase known stacks, version tags)
@@ -834,7 +834,7 @@ Output ONLY the markdown, no preamble. Adapt to the actual stack the user chose 
     # ── Step C: direct LLM call (curl), bypassing the agent tool-loop ──
     local prd=""
     if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-        prd=$(/usr/bin/python3 - "$prompt" "$GEMINI_API_KEY" <<'PYEOF' 2>/dev/null
+        prd=$(python3 - "$prompt" "$GEMINI_API_KEY" <<'PYEOF' 2>/dev/null
 import sys, json, urllib.request
 prompt, key = sys.argv[1], sys.argv[2]
 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
@@ -853,7 +853,7 @@ PYEOF
     fi
     if [[ -z "$prd" ]] || [[ ${#prd} -lt 400 ]]; then
         if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-            prd=$(/usr/bin/python3 - "$prompt" "$OPENROUTER_API_KEY" <<'PYEOF' 2>/dev/null
+            prd=$(python3 - "$prompt" "$OPENROUTER_API_KEY" <<'PYEOF' 2>/dev/null
 import sys, json, urllib.request
 prompt, key = sys.argv[1], sys.argv[2]
 body = {"model":"qwen/qwen3-coter","messages":[{"role":"user","content":prompt}],
@@ -884,7 +884,7 @@ PYEOF
     else
         echo "$prd" > "$target"
         # ── Step D: push PRD as training pair (HF dataset feedback loop) ───
-        /usr/bin/python3 - "$prompt" "$prd" <<'PYEOF' 2>/dev/null &
+        python3 - "$prompt" "$prd" <<'PYEOF' 2>/dev/null &
 import sys, json, time, os
 from pathlib import Path
 log = Path.home() / '.surrogate' / 'training-pairs.jsonl'
@@ -941,7 +941,7 @@ auto_dev_mode() {
         # Drive tasks from plan until all done
         while true; do
             # Pop next pending task from plan
-            NEXT_TASK=$(/usr/bin/python3 <<'PYEOF'
+            NEXT_TASK=$(python3 <<'PYEOF'
 import sys, re
 from pathlib import Path
 plan_file = Path.home() / '.surrogate' / 'active-plan.md'
@@ -960,7 +960,7 @@ PYEOF
             echo "${BCY}${B}▸ Next task:${R} $NEXT_TASK"
             bash ~/.surrogate/bin/surrogate-orchestrate.sh "$NEXT_TASK"
             # Mark done in plan
-            /usr/bin/python3 <<PYEOF
+            python3 <<PYEOF
 from pathlib import Path
 plan_file = Path.home() / '.surrogate' / 'active-plan.md'
 if plan_file.exists():
@@ -1035,7 +1035,7 @@ monitor_mode() {
         # If critical → spawn agent to investigate
         if [[ $ERR_COUNT -gt 50 ]]; then
             echo "${RE}⚠ elevated errors — dispatching investigator agent${R}"
-            (run_agent "เช็ค ~/.surrogate/logs/ หา pattern error ที่ recur บ่อย และเสนอ fix list (ห้ามแก้เอง รายงานอย่างเดียว)" 2>&1 | /usr/bin/head -20) &
+            (run_agent "เช็ค ~/.surrogate/logs/ หา pattern error ที่ recur บ่อย และเสนอ fix list (ห้ามแก้เอง รายงานอย่างเดียว)" 2>&1 | head -20) &
         fi
         sleep 30
     done
@@ -1070,7 +1070,7 @@ show_agents() {
     banner
     echo ""
     echo "${B}▸ Available agents (~/.surrogate/agents/)${R}"
-    ls ~/.surrogate/agents/*.md 2>/dev/null | /usr/bin/sed 's|.*/||;s|.md$||' | sed 's/^/  /'
+    ls ~/.surrogate/agents/*.md 2>/dev/null | sed 's|.*/||;s|.md$||' | sed 's/^/  /'
 }
 
 # ═══ Dispatch ═══

@@ -33,7 +33,7 @@ case "$CMD" in
         shift
         TASK="$*"
         [[ -z "$TASK" ]] && { echo "need task"; exit 2; }
-        ENQUEUE_TASK="$TASK" /usr/bin/python3 - "$QUEUE" <<'PYEOF'
+        ENQUEUE_TASK="$TASK" python3 - "$QUEUE" <<'PYEOF'
 import json, uuid, os, sys
 from datetime import datetime
 queue_path = sys.argv[1]
@@ -159,7 +159,7 @@ PYEOF
     _worker)
         # ── Pop one task from queue (P0-user first, then plan, then self-gen) ──────
         _pop_queue() {
-            /usr/bin/python3 <<PYEOF
+            python3 <<PYEOF
 import json, os, sys, fcntl
 from pathlib import Path
 q = Path(os.path.expanduser('$QUEUE'))
@@ -188,7 +188,7 @@ PYEOF
 
         # ── Pop next task from active plan (no sleep needed — plan drives work) ──
         _pop_plan() {
-            /usr/bin/python3 <<'PYEOF'
+            python3 <<'PYEOF'
 import sys, json, os, re, uuid
 from pathlib import Path
 from datetime import datetime
@@ -223,7 +223,7 @@ PYEOF
 
         # ── Self-generate task from pool (fallback when no plan + queue empty) ──
         _self_gen() {
-            AUTO_TASK=$(/usr/bin/python3 <<'PYEOF'
+            AUTO_TASK=$(python3 <<'PYEOF'
 import json, os, random
 from pathlib import Path
 ep = Path(os.path.expanduser('~/.surrogate/state/surrogate-memory/episodes.jsonl'))
@@ -278,7 +278,7 @@ for t in random.sample(pool, len(pool)):
 print(chosen or pool[0])
 PYEOF
 )
-            echo "{\"id\":\"auto-$(/usr/bin/python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')\",\"task\":\"$AUTO_TASK\",\"self_generated\":true,\"source\":\"self-gen\"}"
+            echo "{\"id\":\"auto-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')\",\"task\":\"$AUTO_TASK\",\"self_generated\":true,\"source\":\"self-gen\"}"
         }
 
         # ── Task resolution: queue → plan → self-gen (no 60s sleep) ─────────────
@@ -297,9 +297,9 @@ PYEOF
         fi
 
         # Extract task
-        TASK=$(echo "$TASK_JSON" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read())['task'])")
-        TID=$(echo "$TASK_JSON" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read())['id'])")
-        SOURCE=$(echo "$TASK_JSON" | /usr/bin/python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('source','queue'))")
+        TASK=$(echo "$TASK_JSON" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['task'])")
+        TID=$(echo "$TASK_JSON" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['id'])")
+        SOURCE=$(echo "$TASK_JSON" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('source','queue'))")
 
         echo "[$(date +%H:%M:%S)] worker picked $TID [$SOURCE]: ${TASK:0:80}" >> "$LOG"
         START=$(date +%s)
@@ -311,7 +311,7 @@ PYEOF
 
         # If task came from plan, mark as done ([ ] → [x]) — env vars = safe quoting
         if [[ "$SOURCE" == "plan" ]]; then
-            DAEMON_TASK="$TASK" /usr/bin/python3 - >> "$LOG" 2>&1 <<'PYEOF'
+            DAEMON_TASK="$TASK" python3 - >> "$LOG" 2>&1 <<'PYEOF'
 import re, os
 from pathlib import Path
 plan_file = Path.home() / '.surrogate' / 'active-plan.md'
@@ -327,7 +327,7 @@ PYEOF
 
         # Mark done in audit log
         DAEMON_TASK="$TASK" DAEMON_OUTPUT="$(echo "$OUTPUT" | tail -20)" \
-            /usr/bin/python3 - "$TID" "$SOURCE" "$DUR" "$DONE" >> "$LOG" 2>&1 <<'PYEOF'
+            python3 - "$TID" "$SOURCE" "$DUR" "$DONE" >> "$LOG" 2>&1 <<'PYEOF'
 import json, os, sys
 tid, source, dur, done_path = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 done = {

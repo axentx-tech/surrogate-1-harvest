@@ -16,7 +16,7 @@ build_rich_context() {
     REPO_MAP=""
     for candidate in "$SHARED/repo-maps/${PRIO_PROJECT}_map.md" "$SHARED/repo-maps/${PRIO_PROJECT}.md"; do
         if [[ -f "$candidate" ]]; then
-            REPO_MAP=$(/usr/bin/head -c 10000 "$candidate")
+            REPO_MAP=$(head -c 10000 "$candidate")
             break
         fi
     done
@@ -25,39 +25,39 @@ build_rich_context() {
     SIMILAR_FUNCS=""
     if [[ -d "$PROJECT_DIR" ]]; then
         # Extract keywords from title for grep
-        local KW=$(echo "$PRIO_TITLE" | /usr/bin/tr '[:upper:]' '[:lower:]' | /usr/bin/tr -cs 'a-z0-9' ' ' | /usr/bin/tr ' ' '\n' | /usr/bin/awk 'length>4' | /usr/bin/head -3 | /usr/bin/tr '\n' '|' | /usr/bin/sed 's/|$//')
+        local KW=$(echo "$PRIO_TITLE" | /usr/bin/tr '[:upper:]' '[:lower:]' | /usr/bin/tr -cs 'a-z0-9' ' ' | /usr/bin/tr ' ' '\n' | awk 'length>4' | head -3 | /usr/bin/tr '\n' '|' | sed 's/|$//')
         if [[ -n "$KW" ]]; then
             SIMILAR_FUNCS=$(/usr/bin/find "$PROJECT_DIR" -type f \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.go' \) ! -path '*/node_modules/*' ! -path '*/.hermes-*' 2>/dev/null | \
-                xargs /usr/bin/grep -lE "($KW)" 2>/dev/null | /usr/bin/head -3 | while read f; do
+                xargs grep -lE "($KW)" 2>/dev/null | head -3 | while read f; do
                     echo "=== ${f#$PROJECT_DIR/} ==="
-                    /usr/bin/grep -A3 -E "^(def|function|export const|class|async def|interface)" "$f" 2>/dev/null | /usr/bin/head -30
-                done 2>/dev/null | /usr/bin/head -c 4000)
+                    grep -A3 -E "^(def|function|export const|class|async def|interface)" "$f" 2>/dev/null | head -30
+                done 2>/dev/null | head -c 4000)
         fi
     fi
 
     # 3. RAG: actual code patterns from project (SQLite FTS via ask-sqlite.py if exists)
     RAG_EXAMPLES=""
     if [[ -x "$HOME/.surrogate/bin/ask-sqlite.py" ]]; then
-        RAG_EXAMPLES=$(/usr/bin/python3 "$HOME/.surrogate/bin/ask-sqlite.py" \
-            "$PRIO_PROJECT $PRIO_TITLE" 2>/dev/null | /usr/bin/head -c 3000)
+        RAG_EXAMPLES=$(python3 "$HOME/.surrogate/bin/ask-sqlite.py" \
+            "$PRIO_PROJECT $PRIO_TITLE" 2>/dev/null | head -c 3000)
     fi
 
     # 4. Semantic RAG (from embeddings) — top-5 similar
     SEMANTIC_RAG=""
     if [[ -f "$HOME/.surrogate/embeddings.db" ]]; then
-        SEMANTIC_RAG=$(/usr/bin/python3 "$HOME/.surrogate/bin/embed-doc.py" --query "$PRIO_TITLE" 2>/dev/null | /usr/bin/head -c 2000)
+        SEMANTIC_RAG=$(python3 "$HOME/.surrogate/bin/embed-doc.py" --query "$PRIO_TITLE" 2>/dev/null | head -c 2000)
     fi
 
     # 5. Past ACCEPTED examples (few-shot from quality≥7 history)
     FEWSHOT_ACCEPTED=""
-    for review in $(/bin/ls -t "$HOME/.hermes/workspace/qwen-coder-reviews/"*.review.json 2>/dev/null | /usr/bin/head -30); do
-        if /usr/bin/grep -qE '"quality_score":\s*[789]|"quality_score":\s*10' "$review" 2>/dev/null; then
+    for review in $(/bin/ls -t "$HOME/.hermes/workspace/qwen-coder-reviews/"*.review.json 2>/dev/null | head -30); do
+        if grep -qE '"quality_score":\s*[789]|"quality_score":\s*10' "$review" 2>/dev/null; then
             local OUT_FILE=$(basename "$review" .review.json)
             # Search all worker output dirs
             for WD in qwen-coder dev-cloud-samba dev-cloud-github dev-cloud-cloudflare dev-cloud-groq dev-cloud-synthesis; do
                 local OUT_PATH="$HOME/.hermes/workspace/$WD/${OUT_FILE}.md"
                 if [[ -f "$OUT_PATH" ]]; then
-                    FEWSHOT_ACCEPTED=$(/usr/bin/head -c 2000 "$OUT_PATH")
+                    FEWSHOT_ACCEPTED=$(head -c 2000 "$OUT_PATH")
                     break 2
                 fi
             done
@@ -66,8 +66,8 @@ build_rich_context() {
 
     # 6. Anti-patterns (last 5 rejection reasons across all workers)
     ANTI_PATTERNS=""
-    for review in $(/bin/ls -t "$HOME/.hermes/workspace/qwen-coder-reviews/"*.review.json 2>/dev/null | /usr/bin/head -10); do
-        local bugs=$(/usr/bin/python3 -c "
+    for review in $(/bin/ls -t "$HOME/.hermes/workspace/qwen-coder-reviews/"*.review.json 2>/dev/null | head -10); do
+        local bugs=$(python3 -c "
 import json, re, sys
 try:
     txt = open('$review').read()
@@ -81,14 +81,14 @@ except: pass
 " 2>/dev/null)
         [[ -n "$bugs" ]] && ANTI_PATTERNS="$ANTI_PATTERNS$bugs"$'\n'
     done
-    ANTI_PATTERNS=$(echo "$ANTI_PATTERNS" | /usr/bin/head -10)
+    ANTI_PATTERNS=$(echo "$ANTI_PATTERNS" | head -10)
 
     # 7. Active-learning prompt deltas — aggregate last 5 UNIQUE anti-patterns.
     # Preference: same-project anti-patterns first, then generic.
     # Dedup by first 80 chars of prompt_addition (similar bugs shouldn't bloat prompt).
     PROMPT_DELTAS=""
     if [[ -f "$HOME/.surrogate/memory/worker-prompt-deltas.jsonl" ]]; then
-        PROMPT_DELTAS=$(/usr/bin/python3 -c "
+        PROMPT_DELTAS=$(python3 -c "
 import json, sys
 from pathlib import Path
 try:
@@ -124,7 +124,7 @@ except Exception as e: pass
     # lower because they're supplementary; the spec is authoritative.
     PRIO_SPEC=""
     local SPEC_FILE="$HOME/.hermes/workspace/swarm-shared/specs/${PRIO_ID}.md"
-    [[ -f "$SPEC_FILE" ]] && PRIO_SPEC=$(/usr/bin/head -c 6000 "$SPEC_FILE")
+    [[ -f "$SPEC_FILE" ]] && PRIO_SPEC=$(head -c 6000 "$SPEC_FILE")
 
     # 9. Task-type authoritative sources — boost scraped knowledge based on title.
     # Security task → CVE/MITRE/OWASP/Prowler. SRE → Google SRE/postmortems.
@@ -132,7 +132,7 @@ except Exception as e: pass
     # This is THE fix that makes all our scraping actually used by Hermes workers.
     AUTHORITATIVE_CONTEXT=""
     if [[ -f "$HOME/.surrogate/index.db" ]]; then
-        AUTHORITATIVE_CONTEXT=$(/usr/bin/python3 <<PYEOF
+        AUTHORITATIVE_CONTEXT=$(python3 <<PYEOF
 import sqlite3, re
 title = """${PRIO_TITLE}""".lower()
 project = """${PRIO_PROJECT}""".lower()
@@ -223,7 +223,7 @@ PYEOF
 
     # 10. FalkorDB graph — related decisions + past priorities with similar theme
     GRAPH_CONTEXT=""
-    local REDIS_SOCK=$(/usr/bin/find /var/folders /tmp -name 'redis.socket' -type s 2>/dev/null | /usr/bin/head -1)
+    local REDIS_SOCK=$(/usr/bin/find /var/folders /tmp -name 'redis.socket' -type s 2>/dev/null | head -1)
     if [[ -n "$REDIS_SOCK" ]]; then
         # Get related priorities + learned rules
         GRAPH_CONTEXT=$(/opt/homebrew/bin/redis-cli -s "$REDIS_SOCK" GRAPH.QUERY ashira "
@@ -231,14 +231,14 @@ PYEOF
             OPTIONAL MATCH (p)-[:HAS_LEARNED_RULE]->(l:LearnedRule)
             OPTIONAL MATCH (p)-[:COMMITTED_AS]->(c:Commit)
             RETURN p.id, p.title, l.content, c.msg LIMIT 8
-        " 2>/dev/null | /usr/bin/tail -c 2500)
+        " 2>/dev/null | tail -c 2500)
     fi
 
     # 11. Hermes trace recall — past similar tasks Hermes handled (from JSONL)
     HERMES_RECALL=""
     local TRACE_DIR="$HOME/axentx/surrogate/data/training-jsonl"
     if [[ -d "$TRACE_DIR" ]]; then
-        HERMES_RECALL=$(/usr/bin/python3 <<PYEOF
+        HERMES_RECALL=$(python3 <<PYEOF
 import json, re, glob
 title = """${PRIO_TITLE}""".lower()
 words = [w for w in re.sub(r'[^a-zA-Z0-9 ]', ' ', title).split() if len(w) > 4][:4]
