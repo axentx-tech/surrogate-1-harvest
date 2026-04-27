@@ -332,7 +332,6 @@ def llm(messages):
 
     def try_ollama(model='surrogate-1'):
         # Local Ollama fallback — last resort when ALL cloud providers fail.
-        # Uses OpenAI-compatible endpoint at localhost:11434/v1.
         body = {'model':model,'messages':messages,'temperature':0.2,'max_tokens':3000,'stream':False,'keep_alive':'5m'}
         req = urllib.request.Request('http://localhost:11434/v1/chat/completions',
             data=json.dumps(body).encode(),
@@ -340,7 +339,26 @@ def llm(messages):
         with urllib.request.urlopen(req,timeout=180) as r:
             return json.load(r)['choices'][0]['message']['content']
 
+    def try_hf_hermes():
+        # Delegate to Hermes brain on HF Space — runs full orchestration there.
+        # Requires HF_HERMES_URL env (default: axentx/surrogate-1 public endpoint)
+        url = os.environ.get('HF_HERMES_URL', 'https://axentx-surrogate-1.hf.space/chat')
+        # Build a single user prompt from messages (HF endpoint expects flat prompt)
+        user_msg = next((m['content'] for m in reversed(messages) if m['role']=='user'), '')
+        sys_msg = next((m['content'] for m in messages if m['role']=='system'), '')
+        prompt = f"{sys_msg}\n\n---\n\n{user_msg}" if sys_msg else user_msg
+        body = {'prompt': prompt[:8000], 'max_steps': MAX_STEPS, 'timeout_sec': 180}
+        req = urllib.request.Request(url, data=json.dumps(body).encode(),
+            headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=200) as r:
+            d = json.load(r)
+            return d.get('response') or '(no response from HF Hermes)'
+
     ladder = []
+    # Primary: Hermes brain on HF Space — uses full orchestration (cloud ladder + local + RAG)
+    # Set USE_HF_HERMES=0 to disable this rung
+    if os.environ.get('USE_HF_HERMES', '1') == '1':
+        ladder.append(('hf-hermes', lambda: try_hf_hermes()))
     if GEMINI: ladder.append(('gemini',lambda: try_gem(GEMINI)))
     if GEMINI2: ladder.append(('gemini2',lambda: try_gem(GEMINI2)))
     if OR_KEY:
@@ -348,7 +366,7 @@ def llm(messages):
             ladder.append((f'or:{m}',lambda m=m: try_oai('https://openrouter.ai/api/v1/chat/completions',m,OR_KEY)))
     for t in GH_POOL[:4]:
         ladder.append(('gh-models',lambda t=t: try_oai('https://models.github.ai/inference/chat/completions','openai/gpt-4o-mini',t)))
-    # Final fallback: local Ollama (Surrogate-1 / gemma4:e4b base) — never costs, never rate-limited
+    # Final fallback: local Ollama (only if installed locally)
     ladder.append(('ollama:surrogate-1', lambda: try_ollama('surrogate-1')))
     ladder.append(('ollama:gemma4:e4b', lambda: try_ollama('gemma4:e4b')))
     if MODEL_OVERRIDE and OR_KEY:
@@ -422,25 +440,90 @@ if final is None:
 PYEOF
 }
 
+# ═══ Slash commands registry (Claude Code parity) ═══
+slash_help() {
+    cat <<EOF
+${B}Slash commands${R} (พิมพ์ ${CY}/${R} แล้ว Tab autocomplete):
+
+  ${CY}/help${R}                 show this help
+  ${CY}/status${R}               session + corpus stats
+  ${CY}/agents${R}               list available agents
+  ${CY}/clear${R}                clear screen + redraw banner
+  ${CY}/exit${R} | ${CY}/quit${R}          end session
+
+${B}Modes${R}:
+  ${CY}/auto${R} [task]          AUTO-DEV pipeline (architect→dev→qa→reviewer)
+  ${CY}/plan${R} [task]          architect only — produce plan, no code changes
+  ${CY}/yolo${R} <task>          execute without permission gates
+  ${CY}/mode${R} <m>             set permission mode: plan|auto|yolo|default|acceptEdits
+
+${B}Project${R}:
+  ${CY}/init${R}                 scaffold SURROGATE.md in cwd
+  ${CY}/plan-set${R} <file>      set active plan (markdown checklist)
+  ${CY}/plan-show${R}            show plan progress (✅/⏳)
+  ${CY}/plan-clear${R}           clear active plan
+
+${B}Configuration${R}:
+  ${CY}/model${R} <name>         override LLM (qwen3-coder | claude-haiku-4.5 | ...)
+  ${CY}/effort${R} <l>           set effort: low | medium | high
+  ${CY}/cwd${R} <path>           change working directory
+
+${B}Diagnostics${R}:
+  ${CY}/memory${R}               show ~/.claude/state/surrogate-memory/
+  ${CY}/cost${R}                 OpenRouter usage today
+  ${CY}/cost-all${R}              all provider usage breakdown
+  ${CY}/health${R}               check HF endpoint + local CLI status
+  ${CY}/monitor${R}               watch logs + system load (background)
+
+${B}Hermes brain${R} (axentx/surrogate-1):
+  ${CY}/remote${R} <task>        force route via HF Space (override local)
+  ${CY}/local${R} <task>          force local-only (skip HF)
+
+${B}Tips${R}:
+  • Type any non-/ text → sends as task to Surrogate-1
+  • Tab key → cycle modes (plan → auto → yolo → default)
+  • Ctrl+C → cancel current step
+EOF
+}
+
 # ═══ REPL ═══
 repl() {
     banner
     echo ""
+    echo "${D}Type ${CY}/help${R}${D} for commands · ${CY}/exit${R}${D} to quit · plain text = task to Surrogate-1${R}"
+    echo ""
     while true; do
-        echo -en "${B}${BMA}▶${R} "
+        # Show project + mode in prompt (Claude-Code style)
+        local prompt_proj="${SURROGATE_MD:+$(basename $(dirname "$SURROGATE_MD"))}"
+        local prompt_str="${B}${BMA}▶${R}"
+        [[ -n "$prompt_proj" ]] && prompt_str="${B}${BMA}[${prompt_proj}]${R} ${prompt_str}"
+        echo -en "$prompt_str "
         if ! IFS= read -r line; then echo ""; break; fi
+        line="${line#"${line%%[![:space:]]*}"}"   # ltrim
         [[ -z "$line" ]] && continue
+
         case "$line" in
             /exit|/quit|exit|quit) break ;;
-            /help) help_text ;;
+            /help|/?) slash_help ;;
             /status) bash "$0" --status ;;
             /clear) clear; banner; echo "" ;;
             /agents) bash "$0" --agents ;;
+            /init) init_project ;;
+            /health)
+                echo "${B}HF endpoint:${R}"
+                curl -sS -m 8 https://axentx-surrogate-1.hf.space/health 2>&1 | head -3
+                echo "${B}Local CLI:${R} ${GR}✓${R} surrogate v$(grep '"Surrogate-1' "$0" | head -1 | grep -oE 'v[0-9.]+')"
+                ;;
             /auto|/auto-dev)
-                echo "${GR}▶ switching to AUTO-DEV mode${R}"
                 TASK=$(echo "$line" | sed 's|^/[a-z-]* *||')
                 [[ -n "$TASK" ]] && bash "$0" --auto-dev "$TASK" || bash "$0" --auto-dev
                 ;;
+            /plan-set*)
+                F=$(echo "$line" | awk '{print $2}')
+                bash "$0" plan set "$F"
+                ;;
+            /plan-show)  bash "$0" plan show ;;
+            /plan-clear) bash "$0" plan clear ;;
             /plan*)
                 TASK=$(echo "$line" | sed 's|^/plan *||')
                 bash "$0" --plan -p "$TASK"
@@ -450,7 +533,21 @@ repl() {
                 PERM_MODE=yolo run_agent "$TASK"
                 ;;
             /monitor) echo "${YE}→ monitor mode...${R}"; bash "$0" --monitor & ;;
-            /model*) NEW=$(echo "$line" | awk '{print $2}'); MODEL="$NEW"; echo "${GR}✓ model → $NEW${R}" ;;
+            /model*)
+                NEW=$(echo "$line" | awk '{print $2}')
+                MODEL="$NEW"; echo "${GR}✓ model → $NEW${R}"
+                ;;
+            /effort*)
+                NEW=$(echo "$line" | awk '{print $2}')
+                case "$NEW" in
+                    low|medium|high) EFFORT="$NEW"; echo "${GR}✓ effort → $NEW${R}" ;;
+                    *) echo "${GY}valid: low | medium | high${R}" ;;
+                esac
+                ;;
+            /cwd*)
+                NEW=$(echo "$line" | awk '{print $2}')
+                cd "$NEW" 2>/dev/null && echo "${GR}✓ cwd → $(pwd)${R}" || echo "${RE}cd failed${R}"
+                ;;
             /mode*)
                 NEW=$(echo "$line" | awk '{print $2}')
                 case "$NEW" in
@@ -462,7 +559,16 @@ repl() {
             /cost)
                 bash -c 'source ~/.hermes/.env; curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/auth/key' 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(f'  OpenRouter: \${d.get(\"usage\",0):.4f}')"
                 ;;
-            /*) echo "${GY}unknown: $line — try /help${R}" ;;
+            /cost-all) bash "$0" --status ;;
+            /remote*)
+                TASK=$(echo "$line" | sed 's|^/remote *||')
+                USE_HF_HERMES=1 run_agent "$TASK"
+                ;;
+            /local*)
+                TASK=$(echo "$line" | sed 's|^/local *||')
+                USE_HF_HERMES=0 run_agent "$TASK"
+                ;;
+            /*) echo "${GY}unknown: $line — try ${CY}/help${GY}${R}" ;;
             *)  run_agent "$line" ;;
         esac
         echo ""
