@@ -5,7 +5,7 @@ FROM python:3.12-slim
 # ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl wget git ca-certificates jq sqlite3 redis-server \
-    ripgrep fswatch supervisor procps net-tools \
+    ripgrep fswatch procps net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Ollama (CPU build for ARM/x86) ──────────────────────────────────────────
@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY --chown=hermes:hermes bin/ /home/hermes/.claude/bin/
 COPY --chown=hermes:hermes config/ /home/hermes/.hermes/config/
 COPY --chown=hermes:hermes start.sh /home/hermes/start.sh
-COPY --chown=hermes:hermes supervisord.conf /etc/supervisor/conf.d/hermes.conf
+# start.sh orchestrates everything (Redis + Ollama + daemons + status server) — no supervisord needed
 RUN chmod +x /home/hermes/.claude/bin/*.sh /home/hermes/start.sh
 
 USER hermes
