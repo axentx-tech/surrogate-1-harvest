@@ -45,6 +45,10 @@ mkdir -p ~/.hermes
 chmod 600 ~/.hermes/.env
 
 # ── 3. Git config + clone axentx repos for auto-orchestrate auto-commit ────
+# Disable interactive prompts globally so failed-auth git ops fail fast.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/true
+
 GH_TOKEN=$(echo "${GITHUB_TOKEN_POOL:-}" | cut -d',' -f1)
 if [[ -n "$GH_TOKEN" ]]; then
     git config --global user.email "hermes@axentx.ai"
@@ -55,12 +59,10 @@ if [[ -n "$GH_TOKEN" ]]; then
 
     PROJECTS_DIR="${DATA}/projects"
     mkdir -p "$PROJECTS_DIR"
-    # Symlink to the path auto-orchestrate-loop expects
     rm -rf ~/axentx 2>/dev/null
     ln -sfn "$PROJECTS_DIR" ~/axentx
 
-    # Clone axentx repos (skip if already exists)
-    # Note: axiomops dropped (using arkship instead). arkship lives under arkashira org.
+    # Clone axentx repos in background with hard timeout — never blocks boot
     for repo_spec in \
         "Costinel:AXENTX/Costinel" \
         "Vanguard:AXENTX/vanguard" \
@@ -69,23 +71,25 @@ if [[ -n "$GH_TOKEN" ]]; then
         local_name="${repo_spec%%:*}"
         gh_path="${repo_spec##*:}"
         target="${PROJECTS_DIR}/${local_name}"
-        if [[ ! -d "$target/.git" ]]; then
-            echo "[$(date +%H:%M:%S)] cloning $gh_path..." >> "$LOG_DIR/boot.log"
-            git clone "https://x-access-token:${GH_TOKEN}@github.com/${gh_path}.git" "$target" \
-                >> "$LOG_DIR/git-clone.log" 2>&1 || \
-                echo "[$(date +%H:%M:%S)] WARN: clone $gh_path failed" >> "$LOG_DIR/boot.log"
-        else
-            # Update existing checkout (pull latest before committing)
-            (cd "$target" && git fetch && git pull --rebase 2>&1 | tail -3) \
-                >> "$LOG_DIR/git-pull.log" 2>&1 || true
-        fi
+        (
+            if [[ ! -d "$target/.git" ]]; then
+                echo "[$(date +%H:%M:%S)] cloning $gh_path..." >> "$LOG_DIR/boot.log"
+                timeout 30 git clone --depth 50 \
+                    "https://x-access-token:${GH_TOKEN}@github.com/${gh_path}.git" "$target" \
+                    >> "$LOG_DIR/git-clone.log" 2>&1 || \
+                    echo "[$(date +%H:%M:%S)] WARN: clone $gh_path failed/timeout" >> "$LOG_DIR/boot.log"
+            else
+                cd "$target" && timeout 20 git pull --rebase >> "$LOG_DIR/git-pull.log" 2>&1 || true
+            fi
+        ) &
     done
+    # Don't wait — let clones finish in background while boot continues
 
     # Persist token for any push from auto-orchestrate
     git config --global credential.helper "store --file=$HOME/.git-credentials"
     echo "https://x-access-token:${GH_TOKEN}@github.com" > ~/.git-credentials
     chmod 600 ~/.git-credentials
-    echo "[$(date +%H:%M:%S)] git auth configured + 4 axentx repos cloned" >> "$LOG_DIR/boot.log"
+    echo "[$(date +%H:%M:%S)] git auth configured + clone jobs spawned" >> "$LOG_DIR/boot.log"
 fi
 
 # ── 4. Redis (TCP only) ─────────────────────────────────────────────────────
