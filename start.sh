@@ -147,8 +147,12 @@ while true; do
     [[ $((M % 20)) -eq 0 ]] && bash ~/.claude/bin/auto-orchestrate-loop.sh >> "$LOG" 2>&1 &
     # Every 30 min: scrape loop (parallel 4)
     [[ $((M % 30)) -eq 0 ]] && bash ~/.claude/bin/domain-scrape-loop.sh 1700 4 >> "$LOG" 2>&1 &
+    # Every 30 min: research-apply (pop queue → orchestrate → ship feature)
+    [[ $((M % 30)) -eq 15 ]] && bash ~/.claude/bin/surrogate-research-apply.sh >> "$LOG" 2>&1 &
     # Every 60 min: keyword tuner
     [[ $((M % 60)) -eq 0 ]] && bash ~/.claude/bin/scrape-keyword-tuner.sh >> "$LOG" 2>&1 &
+    # Every 6 hours: research-loop (discover new features from competitors/papers)
+    [[ $((M % 360)) -eq 30 ]] && bash ~/.claude/bin/surrogate-research-loop.sh >> "$LOG" 2>&1 &
     sleep 60
 done
 CRONSH
