@@ -1,77 +1,146 @@
 #!/usr/bin/env bash
 # Hermes start orchestrator for HF Space.
-# Boots: Redis → Ollama → pull model → all Hermes daemons → keep-alive HTTP server
+# Boots: persistent /data mount → Redis → Ollama → axentx repos → daemons → status server.
 set -uo pipefail
 
 LOG_DIR="${HOME}/.claude/logs"
 mkdir -p "$LOG_DIR"
-
 echo "[$(date +%H:%M:%S)] hermes-hf-space boot start" | tee "$LOG_DIR/boot.log"
 
-# ── 1. Bind secrets from HF Space env to ~/.hermes/.env ─────────────────────
+# ── 1. Persistent data — symlink state dirs to /data (HF persistent mount) ──
+DATA="/data"
+if [[ -d "$DATA" ]] && [[ -w "$DATA" ]]; then
+    mkdir -p "$DATA"/{state,workspace,memory,reflexion,projects,ollama,surrogate,index}
+    # Symlink critical paths so DB/training/ChromaDB persist across rebuilds
+    for src in \
+        "${HOME}/.claude/state:${DATA}/state" \
+        "${HOME}/.hermes/workspace:${DATA}/workspace" \
+        "${HOME}/.surrogate:${DATA}/surrogate" \
+        "${HOME}/.ollama:${DATA}/ollama"; do
+        target="${src%%:*}"
+        link="${src##*:}"
+        mkdir -p "$(dirname "$target")"
+        if [[ ! -L "$target" ]]; then
+            rm -rf "$target" 2>/dev/null
+            ln -sfn "$link" "$target"
+        fi
+    done
+    echo "[$(date +%H:%M:%S)] persistent /data linked" >> "$LOG_DIR/boot.log"
+else
+    echo "[$(date +%H:%M:%S)] WARN: /data not writable — running ephemeral!" >> "$LOG_DIR/boot.log"
+fi
+
+# ── 2. Bind HF Space secrets → ~/.hermes/.env ───────────────────────────────
 mkdir -p ~/.hermes
 {
     echo "# Auto-generated from HF Space secrets at boot"
-    [[ -n "${OPENROUTER_API_KEY:-}" ]]   && echo "OPENROUTER_API_KEY=$OPENROUTER_API_KEY"
-    [[ -n "${GEMINI_API_KEY:-}" ]]       && echo "GEMINI_API_KEY=$GEMINI_API_KEY"
-    [[ -n "${GEMINI_API_KEY_2:-}" ]]     && echo "GEMINI_API_KEY_2=$GEMINI_API_KEY_2"
-    [[ -n "${GITHUB_TOKEN:-}" ]]         && echo "GITHUB_TOKEN=$GITHUB_TOKEN"
-    [[ -n "${GITHUB_TOKEN_POOL:-}" ]]    && echo "GITHUB_TOKEN_POOL=$GITHUB_TOKEN_POOL"
-    [[ -n "${DISCORD_BOT_TOKEN:-}" ]]    && echo "DISCORD_BOT_TOKEN=$DISCORD_BOT_TOKEN"
-    [[ -n "${DISCORD_WEBHOOK:-}" ]]      && echo "DISCORD_WEBHOOK=$DISCORD_WEBHOOK"
+    for k in OPENROUTER_API_KEY GEMINI_API_KEY GEMINI_API_KEY_2 \
+             GITHUB_TOKEN GITHUB_TOKEN_POOL DISCORD_BOT_TOKEN DISCORD_WEBHOOK \
+             CEREBRAS_API_KEY GROQ_API_KEY SAMBANOVA_API_KEY \
+             CLOUDFLARE_API_KEY NVIDIA_API_KEY CHUTES_API_KEY ANTHROPIC_API_KEY; do
+        v="${!k:-}"
+        [[ -n "$v" ]] && echo "${k}=${v}"
+    done
 } > ~/.hermes/.env
 chmod 600 ~/.hermes/.env
 
-# ── 2. Redis (TCP only, default 6379) ────────────────────────────────────────
-redis-server --daemonize yes --port 6379 --bind 127.0.0.1 --maxmemory 1gb --maxmemory-policy allkeys-lru
-sleep 1
-redis-cli -h 127.0.0.1 -p 6379 ping >> "$LOG_DIR/redis.log"
+# ── 3. Git config + clone axentx repos for auto-orchestrate auto-commit ────
+GH_TOKEN=$(echo "${GITHUB_TOKEN_POOL:-}" | cut -d',' -f1)
+if [[ -n "$GH_TOKEN" ]]; then
+    git config --global user.email "hermes@axentx.ai"
+    git config --global user.name  "Hermes (Surrogate-1)"
+    git config --global init.defaultBranch main
+    git config --global pull.rebase true
+    git config --global push.default current
 
-# ── 3. Ollama (background, CPU mode) ────────────────────────────────────────
-OLLAMA_HOST=127.0.0.1:11434 nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
-sleep 6
+    PROJECTS_DIR="${DATA}/projects"
+    mkdir -p "$PROJECTS_DIR"
+    # Symlink to the path auto-orchestrate-loop expects
+    rm -rf ~/axentx 2>/dev/null
+    ln -sfn "$PROJECTS_DIR" ~/axentx
 
-# Pull model on first boot only — gemma4:e4b ~9.6 GB
-if ! ollama list 2>/dev/null | grep -q "gemma4:e4b"; then
-    echo "[$(date +%H:%M:%S)] pulling gemma4:e4b (first boot, ~5-10 min)" >> "$LOG_DIR/boot.log"
-    ollama pull gemma4:e4b >> "$LOG_DIR/ollama.log" 2>&1 &
+    # Clone axentx repos (skip if already exists)
+    for repo_spec in \
+        "Costinel:AXENTX/Costinel" \
+        "Vanguard:AXENTX/vanguard" \
+        "axiomops:AXENTX/axiomops" \
+        "surrogate-1:AXENTX/surrogate-1"; do
+        local_name="${repo_spec%%:*}"
+        gh_path="${repo_spec##*:}"
+        target="${PROJECTS_DIR}/${local_name}"
+        if [[ ! -d "$target/.git" ]]; then
+            echo "[$(date +%H:%M:%S)] cloning $gh_path..." >> "$LOG_DIR/boot.log"
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/${gh_path}.git" "$target" \
+                >> "$LOG_DIR/git-clone.log" 2>&1 || \
+                echo "[$(date +%H:%M:%S)] WARN: clone $gh_path failed" >> "$LOG_DIR/boot.log"
+        else
+            # Update existing checkout (pull latest before committing)
+            (cd "$target" && git fetch && git pull --rebase 2>&1 | tail -3) \
+                >> "$LOG_DIR/git-pull.log" 2>&1 || true
+        fi
+    done
+
+    # Persist token for any push from auto-orchestrate
+    git config --global credential.helper "store --file=$HOME/.git-credentials"
+    echo "https://x-access-token:${GH_TOKEN}@github.com" > ~/.git-credentials
+    chmod 600 ~/.git-credentials
+    echo "[$(date +%H:%M:%S)] git auth configured + 4 axentx repos cloned" >> "$LOG_DIR/boot.log"
 fi
 
-# ── 4. Discord bot ───────────────────────────────────────────────────────────
+# ── 4. Redis (TCP only) ─────────────────────────────────────────────────────
+redis-server --daemonize yes --port 6379 --bind 127.0.0.1 \
+    --maxmemory 1gb --maxmemory-policy allkeys-lru
+sleep 1
+redis-cli -h 127.0.0.1 -p 6379 ping >> "$LOG_DIR/redis.log" 2>&1
+
+# ── 5. Ollama (background, CPU mode) ────────────────────────────────────────
+OLLAMA_MODELS="${HOME}/.ollama/models" \
+OLLAMA_HOST=127.0.0.1:11434 \
+nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+sleep 6
+
+# Pull model only on first boot (model cache lives in /data/.ollama/models)
+if ! ollama list 2>/dev/null | grep -q "gemma4:e4b"; then
+    echo "[$(date +%H:%M:%S)] pulling gemma4:e4b (~9.6 GB, first boot, 5-15 min)" >> "$LOG_DIR/boot.log"
+    nohup ollama pull gemma4:e4b > "$LOG_DIR/ollama-pull.log" 2>&1 &
+fi
+
+# ── 6. Discord bot (background) ─────────────────────────────────────────────
 if [[ -n "${DISCORD_BOT_TOKEN:-}" ]]; then
     set -a; source ~/.hermes/.env; set +a
     nohup python ~/.claude/bin/hermes-discord-bot.py >> "$LOG_DIR/discord-bot.log" 2>&1 &
     echo "[$(date +%H:%M:%S)] discord bot started" >> "$LOG_DIR/boot.log"
 fi
 
-# ── 5. Periodic loops via inline cron (no systemd/launchd on HF) ────────────
+# ── 7. Cron loop — fires Hermes daemons 24/7 (no sleep gaps) ────────────────
 cat > /tmp/hermes-cron.sh <<'CRONSH'
 #!/bin/bash
 set -a; source ~/.hermes/.env 2>/dev/null; set +a
+LOG="${HOME}/.claude/logs/cron.log"
+mkdir -p "$(dirname "$LOG")"
 while true; do
-    NOW=$(date +%s)
-    M=$((NOW / 60))
-    # Every 90s: surrogate-dev-loop
-    [[ $((M % 2)) -eq 0 ]] && bash ~/.claude/bin/surrogate-dev-loop.sh 1 &
-    # Every 30 min: scrape loop
-    [[ $((M % 30)) -eq 0 ]] && bash ~/.claude/bin/domain-scrape-loop.sh 1700 4 &
+    M=$(($(date +%s) / 60))
+    # Every 90s: continuous local dev (gemma)
+    [[ $((M % 2)) -eq 0 ]] && bash ~/.claude/bin/surrogate-dev-loop.sh 1 >> "$LOG" 2>&1 &
+    # Every 5 min: producer pushes priorities to Redis
+    [[ $((M % 5)) -eq 0 ]] && bash ~/.claude/bin/work-queue-producer.sh >> "$LOG" 2>&1 &
+    # Every 20 min: full orchestrate chain (architect → dev → qa → reviewer + git push)
+    [[ $((M % 20)) -eq 0 ]] && bash ~/.claude/bin/auto-orchestrate-loop.sh >> "$LOG" 2>&1 &
+    # Every 30 min: scrape loop (parallel 4)
+    [[ $((M % 30)) -eq 0 ]] && bash ~/.claude/bin/domain-scrape-loop.sh 1700 4 >> "$LOG" 2>&1 &
     # Every 60 min: keyword tuner
-    [[ $((M % 60)) -eq 0 ]] && bash ~/.claude/bin/scrape-keyword-tuner.sh &
-    # Every 20 min: auto-orchestrate
-    [[ $((M % 20)) -eq 0 ]] && bash ~/.claude/bin/auto-orchestrate-loop.sh &
-    # Every 5 min: producer
-    [[ $((M % 5)) -eq 0 ]] && bash ~/.claude/bin/work-queue-producer.sh &
+    [[ $((M % 60)) -eq 0 ]] && bash ~/.claude/bin/scrape-keyword-tuner.sh >> "$LOG" 2>&1 &
     sleep 60
 done
 CRONSH
 chmod +x /tmp/hermes-cron.sh
-nohup /tmp/hermes-cron.sh > "$LOG_DIR/cron.log" 2>&1 &
+nohup /tmp/hermes-cron.sh > "$LOG_DIR/cron-master.log" 2>&1 &
 echo "[$(date +%H:%M:%S)] cron loop started" >> "$LOG_DIR/boot.log"
 
-# ── 6. HTTP status endpoint on port 7860 (HF requires this — keep-alive) ────
-python <<'PYEOF' &
+# ── 8. Status HTTP server on :7860 (HF requires + UptimeRobot keep-alive) ──
+python3 <<'PYEOF' &
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, sqlite3, subprocess
+import json, os, sqlite3, subprocess, datetime
 from pathlib import Path
 
 class StatusHandler(BaseHTTPRequestHandler):
@@ -79,34 +148,39 @@ class StatusHandler(BaseHTTPRequestHandler):
         try:
             ledger = sqlite3.connect(os.path.expanduser('~/.claude/state/scrape-ledger.db')).execute(
                 'SELECT COUNT(*) FROM scraped').fetchone()[0]
-        except Exception:
-            ledger = 0
+        except Exception: ledger = 0
         try:
-            train = sum(1 for _ in open(p) for p in Path('~/.claude/state/surrogate-memory/episodes.jsonl').expanduser().glob('*'))
-        except Exception:
-            train = 0
+            ep_path = Path(os.path.expanduser('~/.claude/state/surrogate-memory/episodes.jsonl'))
+            episodes = sum(1 for _ in ep_path.open()) if ep_path.exists() else 0
+        except Exception: episodes = 0
         try:
-            procs = subprocess.run(['pgrep', '-fc', 'discord-bot|surrogate-dev|scrape-loop'],
-                                  capture_output=True, text=True).stdout.strip()
-        except Exception:
-            procs = '?'
+            procs = int(subprocess.run(['pgrep', '-fc', 'discord-bot|surrogate-dev|scrape-loop|hermes-cron'],
+                                      capture_output=True, text=True).stdout.strip() or 0)
+        except Exception: procs = 0
+        try:
+            train_dir = Path(os.path.expanduser('~/.claude/state/surrogate-memory'))
+            disk_mb = sum(p.stat().st_size for p in train_dir.rglob('*') if p.is_file()) // (1024*1024)
+        except Exception: disk_mb = 0
         body = json.dumps({
+            'service': 'hermes',
             'status': 'ok',
+            'ts': datetime.datetime.utcnow().isoformat() + 'Z',
             'ledger_repos': ledger,
-            'episodes': train,
+            'episodes': episodes,
             'daemons_running': procs,
+            'memory_disk_mb': disk_mb,
         }, indent=2)
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body.encode())
+    def log_message(self, *args): pass
 
-    def log_message(self, *args): pass  # silence stdout
-
-print('[hermes] status server on :7860', flush=True)
+print('[hermes] status :7860', flush=True)
 HTTPServer(('0.0.0.0', 7860), StatusHandler).serve_forever()
 PYEOF
 
-# ── Wait forever (PID 1 must not exit) ──────────────────────────────────────
+# ── 9. Container PID 1 — tail boot log forever ──────────────────────────────
 echo "[$(date +%H:%M:%S)] boot complete — entering watch mode" >> "$LOG_DIR/boot.log"
 tail -f "$LOG_DIR/boot.log"
