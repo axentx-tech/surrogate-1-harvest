@@ -210,6 +210,98 @@ DATASETS = [
     ("VMware/open-instruct-v1-oasst-dolly-hhrlhf",  "Apache",      "vmware-openinstr",    "instr-resp",           300000),
     # SmolTalk2 instruction-tuned filtered subset (was already in but ensure pulled)
     # ════════════════════════════════════════════════════════════════════════
+    # MORE TRILLION-SCALE PRETRAIN — every public source we missed
+    # ════════════════════════════════════════════════════════════════════════
+    # FineWeb FULL (15T tokens, not just edu — broader)
+    ("HuggingFaceFW/fineweb",                       "ODC-By",      "fineweb-full",        "web-text",            5000000),
+    # FineWeb-2 multilingual
+    ("HuggingFaceFW/fineweb-2",                     "ODC-By",      "fineweb-2",           "web-text",            3000000),
+    # DCLM-baseline (4T tokens, mlfoundations heavily filtered)
+    ("mlfoundations/dclm-baseline-1.0",             "Apache",      "dclm-baseline",       "web-text",            5000000),
+    # CulturaX (6.3T multilingual ODC-By, replaces stale mc4)
+    ("uonlp/CulturaX",                              "ODC-By",      "culturax",            "web-text",            3000000),
+    # FineMath (math-filtered web — Apache)
+    ("HuggingFaceTB/finemath",                      "Apache",      "finemath",            "instr-resp",          2000000),
+    # FinePDFs (PDF books extracted — Apache)
+    ("HuggingFaceTB/finepdfs",                      "Apache",      "finepdfs",            "web-text",            2000000),
+    # C4 (Apache T5 training corpus)
+    ("allenai/c4",                                  "ODC-By",      "c4",                  "web-text",            2000000),
+    # The Stack v1 dedup (3TB, Apache filterable)
+    ("bigcode/the-stack",                           "Permissive",  "the-stack-v1",        "code-only-permissive",3000000),
+    # GitHub Jupyter notebooks (Apache)
+    ("codeparrot/github-jupyter",                   "Apache",      "github-jupyter",      "notebook-messages",   500000),
+    # SkyPile-150B (Apache Chinese-English)
+    ("Skywork/SkyPile-150B",                        "Apache",      "skypile-150b",        "web-text",            1000000),
+    # Wikipedia (Apache full)
+    ("wikimedia/wikipedia",                         "Apache",      "wikipedia",           "web-text",            500000),
+    # ════════════════════════════════════════════════════════════════════════
+    # MASSIVE INSTRUCTION CORPORA — parents of subsets we already have
+    # ════════════════════════════════════════════════════════════════════════
+    # OpenOrca FULL (4.2M parent of SlimOrca, Apache)
+    ("Open-Orca/OpenOrca",                          "Apache",      "openorca-full",       "conversations",       2000000),
+    # ultrachat FULL (1.5M parent of ultrachat_200k, Apache)
+    ("stingning/ultrachat",                         "Apache",      "ultrachat-full",      "messages",            1000000),
+    # LMSYS chat 1M (Apache real conversations)
+    ("lmsys/lmsys-chat-1m",                         "Apache",      "lmsys-chat-1m",       "conversations",       1000000),
+    # CohereForAI Aya collection (513M parent, Apache multilingual)
+    ("CohereForAI/aya_collection",                  "Apache",      "aya-collection-full", "instr-resp",          2000000),
+    # Magpie-Llama-3.3-Pro-1M (Apache, 1M synthetic instruct)
+    ("Magpie-Align/Magpie-Llama-3.3-Pro-1M-v0.1",   "Apache",      "magpie-llama33-pro",  "conversations",       1000000),
+    # Magpie reasoning V1 150K (Apache)
+    ("Magpie-Align/Magpie-Reasoning-V1-150K",       "Apache",      "magpie-reasoning-v1", "conversations",        150000),
+    # Magpie Air DPO 100K (Apache)
+    ("Magpie-Align/Magpie-Air-DPO-100K-v0.1",       "Apache",      "magpie-air-dpo",      "chosen-rejected",      100000),
+    # Open Assistant Guanaco curated (Apache, top quality)
+    ("timdettmers/openassistant-guanaco",            "Apache",      "guanaco",             "messages",              9000),
+    # GAIR/LIMA (Apache, premium curated 1K — Less Is More for Alignment)
+    ("GAIR/lima",                                   "Apache",      "lima",                "instr-resp",             1030),
+    # HuggingFaceH4 CodeUltraFeedback (Apache 50K)
+    ("HuggingFaceH4/CodeUltraFeedback",             "Apache",      "code-ultrafeedback",  "instr-resp",            50000),
+    # ════════════════════════════════════════════════════════════════════════
+    # MATH MEGA-CORPORA
+    # ════════════════════════════════════════════════════════════════════════
+    # NuminaMath CoT (859K Apache)
+    ("AI-MO/NuminaMath-CoT",                        "Apache",      "numina-math-cot",     "instr-resp",           859000),
+    # NuminaMath 1.5 (1.5M Apache)
+    ("AI-MO/NuminaMath-1.5",                        "Apache",      "numina-math-1-5",     "instr-resp",          1500000),
+    # MathPile (9.5B tokens Apache)
+    ("xDAN-AI/MathPile",                            "Apache",      "math-pile",           "web-text",            1000000),
+    # ════════════════════════════════════════════════════════════════════════
+    # PREFERENCE / DPO MEGA-MIXES
+    # ════════════════════════════════════════════════════════════════════════
+    # Argilla distilabel orca DPO pairs (MIT)
+    ("argilla/distilabel-intel-orca-dpo-pairs",     "MIT",         "argilla-orca-dpo",    "chosen-rejected",       12000),
+    # Argilla DPO mix 7K (MIT)
+    ("argilla/dpo-mix-7k",                          "MIT",         "argilla-dpo-mix",     "chosen-rejected",        7000),
+    # Argilla math preference DPO (Apache)
+    ("argilla/distilabel-math-preference-dpo",      "Apache",      "argilla-math-dpo",    "chosen-rejected",        2000),
+    # Argilla capybara DPO 7K (Apache)
+    ("argilla/distilabel-capybara-dpo-7k-binarized","Apache",      "argilla-capybara-dpo","chosen-rejected",        7000),
+    # H4 orca DPO pairs (Apache)
+    ("HuggingFaceH4/orca_dpo_pairs",                "Apache",      "h4-orca-dpo",         "chosen-rejected",       12000),
+    # H4 ultrafeedback binarized (Apache, larger version)
+    ("HuggingFaceH4/ultrafeedback_binarized",       "MIT",         "ultrafeedback-bin",   "chosen-rejected",       64000),
+    # ════════════════════════════════════════════════════════════════════════
+    # LONG-CONTEXT + SPECIALIZED
+    # ════════════════════════════════════════════════════════════════════════
+    # Together long-data collections (Apache)
+    ("togethercomputer/Long-Data-Collections",      "Apache",      "long-data",           "messages",             100000),
+    # Abacus AI SystemChat 1.1 (Apache long-context)
+    ("abacusai/SystemChat-1.1",                     "Apache",      "systemchat",          "messages",             100000),
+    # NumbersStation Text2SQL (290K Apache)
+    ("NumbersStation/NSText2SQL",                   "Apache",      "ns-text2sql",         "schema-sql",           290000),
+    # ════════════════════════════════════════════════════════════════════════
+    # QA / READING COMPREHENSION (canonical training)
+    # ════════════════════════════════════════════════════════════════════════
+    # Natural Questions (Apache, Google open QA)
+    ("google-research-datasets/natural_questions",  "CC-BY-SA",    "natural-questions",   "query-resp",           300000),
+    # SQuAD v2 (CC-BY-SA Q&A reading)
+    ("rajpurkar/squad_v2",                          "CC-BY-SA",    "squad-v2",            "query-resp",           150000),
+    # TriviaQA (Apache)
+    ("trivia_qa",                                   "Apache",      "trivia-qa",           "query-resp",           100000),
+    # HotpotQA (CC-BY-SA multi-hop)
+    ("hotpotqa/hotpot_qa",                          "CC-BY-SA",    "hotpot-qa",           "query-resp",           100000),
+    # ════════════════════════════════════════════════════════════════════════
     # ROUND 4 — fill remaining gaps (long-context, unit-test gen, more agents)
     # ════════════════════════════════════════════════════════════════════════
     # NVIDIA Nemotron mega-mix (7.2M, recent Aug 2025, 5 langs)
