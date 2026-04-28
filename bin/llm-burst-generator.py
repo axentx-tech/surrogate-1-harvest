@@ -175,13 +175,24 @@ def call_llm(provider: dict, prompt: str, timeout: int = 60) -> str | None:
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            # Cerebras + Groq + OpenRouter sit behind Cloudflare and return
+            # HTTP 403 error code 1010 ('Owner of this website has banned you')
+            # to requests with the default urllib User-Agent. Send a real-
+            # browser-looking string so they pass the bot challenge.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) surrogate-1-burst/1.0",
+            "Accept": "application/json",
         },
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read())
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            choices = data.get("choices") or []
+            if not choices:
+                _first_err_per_provider.setdefault(provider["name"], f"no choices in response: {json.dumps(data)[:150]}")
+                return None
+            msg = (choices[0] or {}).get("message") or {}
+            content = (msg.get("content") or "").strip()
             if len(content) > 100:
                 return content
             _first_err_per_provider.setdefault(provider["name"], f"short response: {content[:100]!r}")
