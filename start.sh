@@ -97,6 +97,13 @@ if [[ -d "$DATA" ]] && [[ -w "$DATA" ]]; then
     nohup bash "${HOME}/.surrogate/bin/lightning-trainer.sh" >> "$LOG_DIR/lightning-trainer.log" 2>&1 &
     echo "[$(date +%H:%M:%S)] boot-time lightning-trainer kicked off (H200 4hr quota)" >> "$LOG_DIR/boot.log"
 
+    # ── BOOT-TIME dataset-mirror — bulk-clone top community SFT mixes ──────
+    # Far faster than streaming-and-normalize — 1 commit per parquet file
+    # = millions of pairs landing as raw mirrors/<slug>/<file>. Idempotent
+    # via stamp file so we don't re-mirror what's already been pulled.
+    nohup bash "${HOME}/.surrogate/bin/dataset-mirror.sh" >> "$LOG_DIR/dataset-mirror.log" 2>&1 &
+    echo "[$(date +%H:%M:%S)] boot-time dataset-mirror kicked off (30 community sources)" >> "$LOG_DIR/boot.log"
+
     echo "[$(date +%H:%M:%S)] persistent /data linked (state, logs, memory, skills, sessions, workspace, ollama, training-pairs)" >> "$LOG_DIR/boot.log"
 else
     echo "[$(date +%H:%M:%S)] WARN: /data not writable — running ephemeral!" >> "$LOG_DIR/boot.log"
