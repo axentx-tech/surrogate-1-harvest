@@ -774,22 +774,41 @@ print(f"Output: {out_path} ({out_path.stat().st_size/1024/1024:.1f} MB)", flush=
 if new_pairs_total > 0:
     repo_path = f"batches/public-merged/{time.strftime('%Y-%m-%d')}/shard{SHARD_ID}-{_iter_ts}.jsonl"
     print(f"\nUploading {repo_path} to axentx/surrogate-1-training-pairs...", flush=True)
-    try:
-        api.upload_file(
-            path_or_fileobj=str(out_path),
-            path_in_repo=repo_path,
-            repo_id="axentx/surrogate-1-training-pairs",
-            repo_type="dataset",
-            commit_message=f"shard{SHARD_ID}@{_iter_ts}: +{new_pairs_total} pairs (coding/dialog/commits/reasoning/iac)"
-        )
-        print(f"✅ uploaded → {repo_path}", flush=True)
-        # Free local disk — file is now safe on HF
+    # Retry the upload up to 5 times with exponential backoff.
+    # HF API surfaces transient 5xx, network hiccups, and rate-limit errors
+    # under heavy concurrent commit load (40+ shards uploading simultaneously).
+    # A previous run lost 846K pairs because a single failure dropped the file.
+    _upload_ok = False
+    for _attempt in range(5):
         try:
-            out_path.unlink()
-        except Exception:
-            pass
-    except Exception as _e:
-        print(f"⚠ upload failed ({_e}); local file kept at {out_path}", flush=True)
+            api.upload_file(
+                path_or_fileobj=str(out_path),
+                path_in_repo=repo_path,
+                repo_id="axentx/surrogate-1-training-pairs",
+                repo_type="dataset",
+                commit_message=f"shard{SHARD_ID}@{_iter_ts}: +{new_pairs_total} pairs (coding/dialog/commits/reasoning/iac)"
+            )
+            print(f"✅ uploaded → {repo_path} (attempt {_attempt + 1})", flush=True)
+            _upload_ok = True
+            try: out_path.unlink()
+            except Exception: pass
+            break
+        except Exception as _e:
+            _delay = 2 ** _attempt + (0.5 * _attempt)  # 1s, 2.5s, 5s, 9.5s, 17s
+            print(f"  ⚠ upload attempt {_attempt + 1}/5 failed: {type(_e).__name__}: {str(_e)[:120]}", flush=True)
+            if _attempt < 4:
+                print(f"     retrying in {_delay:.1f}s...", flush=True)
+                time.sleep(_delay)
+    if not _upload_ok:
+        # Save to a fallback dir so a future run or operator can re-upload manually.
+        _retry_dir = WORK / "upload-retry-queue"
+        _retry_dir.mkdir(parents=True, exist_ok=True)
+        _stash = _retry_dir / out_path.name
+        try:
+            out_path.rename(_stash)
+            print(f"⚠ all 5 upload attempts failed — stashed at {_stash} for retry", flush=True)
+        except Exception as _e2:
+            print(f"⚠ all 5 upload attempts failed AND stash failed ({_e2}); local file at {out_path}", flush=True)
 elif out_path.exists() and out_path.stat().st_size == 0:
     # Empty iteration — drop the empty file to keep /data clean
     try: out_path.unlink()

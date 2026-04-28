@@ -10,15 +10,15 @@ set -a; source "$HOME/.hermes/.env" 2>/dev/null; set +a
 LOG="$HOME/.surrogate/logs/bulk-ingest-parallel.log"
 mkdir -p "$(dirname "$LOG")"
 
-NUM_SHARDS="${INGEST_SHARDS:-4}"           # was 16 -> 6 -> 4. cpu-basic 16Gi
-                                            # cap was breached even with 6
-                                            # shards because 'datasets' lib
-                                            # peaks ~1.5-2 GB during parquet
-                                            # decode under load. 4 shards +
-                                            # parquet-direct (2 DLs) + 30
-                                            # daemons fits comfortably with
-                                            # ~3 GB headroom for the watchdog
-                                            # to react before OOM.
+NUM_SHARDS="${INGEST_SHARDS:-2}"           # was 16 -> 6 -> 4 -> 2. cpu-basic 16Gi
+                                            # cap got breached AGAIN at 4
+                                            # shards. Watchdog is too slow
+                                            # (60s tick) to catch the spike
+                                            # when all shards do parquet
+                                            # decode at the same instant.
+                                            # 2 shards on Space + 40 GH
+                                            # Actions runners = real work
+                                            # has moved off the Space.
 SHARD_COOLDOWN="${SHARD_COOLDOWN:-120}"     # 2 min between shard cycles
 
 echo "[$(date +%H:%M:%S)] bulk-ingest-parallel start (shards=$NUM_SHARDS)" | tee -a "$LOG"
