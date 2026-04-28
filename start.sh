@@ -262,6 +262,15 @@ echo "[$(date +%H:%M:%S)] auto-orchestrate-continuous started (4 parallel worker
 nohup bash ~/.surrogate/bin/self-heal-watchdog.sh > "$LOG_DIR/self-heal-watchdog.log" 2>&1 &
 echo "[$(date +%H:%M:%S)] self-heal-watchdog started (mem<85%, ingest<20m, push<10m)" >> "$LOG_DIR/boot.log"
 
+# ── 7e2. GH-ACTIONS TICKER — burst-dispatch external runners every 60s ──────
+# Fires workflow_dispatch on arkashira/ashiradevops-alt runner repos every
+# 60s, bypassing GitHub's */5 cron minimum. Combined with 8-min runner
+# timeouts, the 20-concurrent free-tier slot cap stays saturated.
+# Skips silently if GH_TOKEN_ARKASHIRA / GH_TOKEN_DEVOPS aren't set as
+# Space secrets — operator can add later without restart-required.
+nohup bash ~/.surrogate/bin/gh-actions-ticker.sh > "$LOG_DIR/gh-actions-ticker.log" 2>&1 &
+echo "[$(date +%H:%M:%S)] gh-actions-ticker started (60s tick, dispatches arkashira+ashiradevops-alt)" >> "$LOG_DIR/boot.log"
+
 # ── 7f. PARALLEL BULK INGEST (slug-hash sharded; 6 shards on cpu-basic) ─────
 # Was 16 shards but caused 'Memory limit exceeded (16Gi)' OOM. Each shard
 # peaks ~1 GB while streaming via 'datasets' lib. Watchdog above provides
