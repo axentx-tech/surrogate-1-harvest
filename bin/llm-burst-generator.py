@@ -38,35 +38,35 @@ PROVIDERS = [
         "name": "cerebras",
         "url": "https://api.cerebras.ai/v1/chat/completions",
         "key_env": "CEREBRAS_API_KEY",
-        "model": "qwen-3-coder-480b",
-        "rpm_budget": 30,           # rough requests-per-minute soft cap
+        "model": "qwen-3-235b-a22b-instruct-2507",   # validated 2026-04-29 against /v1/models
+        "rpm_budget": 30,
     },
     {
         "name": "groq",
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "key_env": "GROQ_API_KEY",
-        "model": "qwen/qwen3-32b",
+        "model": "llama-3.3-70b-versatile",          # validated; qwen3-32b also works
         "rpm_budget": 30,
     },
     {
         "name": "openrouter",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "key_env": "OPENROUTER_API_KEY",
-        "model": "qwen/qwen3-coder:free",
+        "model": "tencent/hy3-preview:free",          # validated, free tier
         "rpm_budget": 20,
     },
     {
         "name": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_API_KEY",
-        "model": "gemini-2.0-flash-exp",
+        "model": "gemini-2.5-flash",                  # newer than 2.0-flash-exp
         "rpm_budget": 60,
     },
     {
         "name": "chutes",
-        "url": "https://api.chutes.ai/v1/chat/completions",
+        "url": "https://llm.chutes.ai/v1/chat/completions",   # corrected subdomain
         "key_env": "CHUTES_API_KEY",
-        "model": "deepseek-ai/DeepSeek-V3",
+        "model": "deepseek-ai/DeepSeek-V3-0324",
         "rpm_budget": 30,
     },
     {
@@ -87,7 +87,7 @@ PROVIDERS = [
         "name": "kimi",
         "url": "https://api.moonshot.ai/v1/chat/completions",
         "key_env": "KIMI_API_KEY",
-        "model": "kimi-k2",
+        "model": "moonshot-v1-32k",                   # kimi-k2 was wrong
         "rpm_budget": 15,
     },
 ]
@@ -151,8 +151,12 @@ def fill_template(category: str, template: str) -> str:
     )
 
 
+_first_err_per_provider: dict[str, str] = {}
+
 def call_llm(provider: dict, prompt: str, timeout: int = 60) -> str | None:
-    """Call one provider, return content or None on failure."""
+    """Call one provider, return content or None on failure.
+    Records first failure reason per provider so the operator can see what's
+    going wrong (model name? auth? rate-limit?) without grepping every line."""
     key = os.environ.get(provider["key_env"], "").strip()
     if not key:
         return None
@@ -178,10 +182,25 @@ def call_llm(provider: dict, prompt: str, timeout: int = 60) -> str | None:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read())
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            return content if len(content) > 100 else None
-    except (urllib.error.HTTPError, urllib.error.URLError, socket.timeout, json.JSONDecodeError):
+            if len(content) > 100:
+                return content
+            _first_err_per_provider.setdefault(provider["name"], f"short response: {content[:100]!r}")
+            return None
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="ignore")[:200]
+        except Exception:
+            body = ""
+        _first_err_per_provider.setdefault(provider["name"], f"HTTP {e.code}: {body}")
         return None
-    except Exception:
+    except urllib.error.URLError as e:
+        _first_err_per_provider.setdefault(provider["name"], f"URLError: {str(e.reason)[:120]}")
+        return None
+    except (socket.timeout, json.JSONDecodeError) as e:
+        _first_err_per_provider.setdefault(provider["name"], f"{type(e).__name__}: {str(e)[:120]}")
+        return None
+    except Exception as e:
+        _first_err_per_provider.setdefault(provider["name"], f"{type(e).__name__}: {str(e)[:120]}")
         return None
 
 
@@ -263,6 +282,13 @@ def main():
         cum_failed += failed
         details = " ".join(f"{n}={c}" for n, c in per_provider.items() if c)
         log(f"cycle {cycle}: kept={kept} fail={failed}  [{details}]  total_kept={cum_kept}")
+
+        # On any cycle that produced zero, dump the first error per provider
+        # so the operator can see why and patch model names / endpoints.
+        if kept == 0 and _first_err_per_provider:
+            for name, err in sorted(_first_err_per_provider.items()):
+                log(f"  diag {name}: {err}")
+            _first_err_per_provider.clear()
 
         # Sleep 60-120s between cycles (random jitter to avoid sync bursts)
         time.sleep(60 + random.randint(0, 60))
