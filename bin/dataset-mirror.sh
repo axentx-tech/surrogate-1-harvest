@@ -146,9 +146,14 @@ skipped = 0
 errors = 0
 
 for src_id, slug in SOURCES:
-    if slug in stamps:
+    # Re-process if previous run kept 0 rows (extractor bug fix this commit)
+    s = stamps.get(slug)
+    if s and isinstance(s, dict) and s.get("kept", 0) > 0:
         skipped += 1
         continue
+    elif s and isinstance(s, int):
+        # Old stamp format (just timestamp) — also retry once with new extractor
+        pass
     target = pick_repo(slug)
     print(f"\n▶ enrich+mirror {src_id}  →  {target}/enriched/{slug}/", flush=True)
     try:
