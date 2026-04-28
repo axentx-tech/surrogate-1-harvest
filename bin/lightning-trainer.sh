@@ -112,8 +112,39 @@ Trainer(model=model,args=args,train_dataset=tokenized,data_collator=collator,
 print("✅ done")
 PYEOF
 
-# Submit to Lightning Studios via lightning CLI
-echo "[$(date +%H:%M:%S)] submitting to Lightning H200 (4hr free quota)" | tee -a "$LOG"
-lightning run app "$TRAIN_SCRIPT" --machine H200 --name "surrogate-1-$(date -u +%Y%m%d-%H%M)" 2>&1 | tee -a "$LOG"
+# Submit to Lightning Studios via Python SDK (lightning run app is deprecated).
+# Strategy: connect to (or create) a Studio with H200 attached, upload the
+# training script, run it via studio.run(). The Studio persists output so
+# we can poll later.
+echo "[$(date +%H:%M:%S)] submitting to Lightning H200 via SDK" | tee -a "$LOG"
+python3 - "$TRAIN_SCRIPT" >> "$LOG" 2>&1 << 'SDK_EOF' || echo "[$(date +%H:%M:%S)] SDK run errored — see log" | tee -a "$LOG"
+import os, sys, time
+script_path = sys.argv[1]
+
+try:
+    from lightning_sdk import Studio, Machine
+except ImportError:
+    print("ERR: lightning_sdk not installed", flush=True)
+    sys.exit(2)
+
+studio_name = f"surrogate-1-train-{time.strftime('%Y%m%d-%H%M', time.gmtime())}"
+print(f"▶ connecting/creating Studio: {studio_name}")
+
+try:
+    studio = Studio(name=studio_name, teamspace="default", create_ok=True,
+                    user_id=os.environ["LIGHTNING_USER_ID"],
+                    api_key=os.environ["LIGHTNING_API_KEY"])
+    studio.start(machine=Machine.H200)
+    print(f"  ✅ Studio H200 started")
+    studio.upload_file(script_path, "train.py")
+    print(f"  ✅ uploaded train.py")
+    # Fire the training in background — SDK doesn't block, returns job id
+    job = studio.run("python train.py", in_background=True)
+    print(f"  ✅ submitted job: {job}")
+    print(f"  Studio URL: {studio.url if hasattr(studio, 'url') else '(check lightning.ai dashboard)'}")
+except Exception as e:
+    print(f"  ❌ {type(e).__name__}: {str(e)[:300]}")
+    sys.exit(3)
+SDK_EOF
 echo "[$(date +%H:%M:%S)] lightning-trainer cycle done" | tee -a "$LOG"
 # trigger: pickup LIGHTNING_USER_ID + LIGHTNING_API_KEY 2026-04-28T20:29:29Z
