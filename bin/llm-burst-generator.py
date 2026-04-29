@@ -90,6 +90,20 @@ PROVIDERS = [
         "model": "moonshot-v1-32k",                   # kimi-k2 was wrong
         "rpm_budget": 15,
     },
+    # ── ALWAYS-ON LOCAL FALLBACK: Ollama on this Space (no key, never rate-limited) ──
+    # User feedback 2026-04-29: "ถ้า freetier หมดก็ใช้ ทุกagent ต้องทำงานตลอด".
+    # When all paid/free APIs fail / hit rate limit, this keeps ingestion alive.
+    # Uses qwen3-coder:30b-a3b → qwen2.5-coder:14b → granite-code:8b → gemma4:e4b
+    # in priority order (whichever is installed). Slower than cloud APIs but
+    # FREE and never rate-limited.
+    {
+        "name": "ollama-local",
+        "url": "http://127.0.0.1:11434/v1/chat/completions",   # Ollama OpenAI-compat
+        "key_env": "ALWAYS_ON",                                # sentinel — never empty
+        "model": "qwen3-coder:30b-a3b-instruct-q4_K_M",        # auto-falls-through if absent
+        "rpm_budget": 60,                                       # unlimited locally
+        "fallback": True,                                       # mark as last-resort
+    },
     # HF Inference API — free hosted Llama / Mistral / Mixtral / etc.
     # User: 'HF local model ก็มี ทำไมเธอไม่เอามาใช้'.
     {
@@ -290,6 +304,8 @@ def main():
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Discover which providers actually have keys set
+    # Sentinel "ALWAYS_ON" treats Ollama-local as always available even without API key.
+    os.environ.setdefault("ALWAYS_ON", "1")
     active = [p for p in PROVIDERS if os.environ.get(p["key_env"], "").strip()]
     if not active:
         print("ERR: no provider keys found in env — set CEREBRAS_API_KEY etc. as Space secrets")

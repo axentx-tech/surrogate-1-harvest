@@ -310,6 +310,22 @@ if os.environ.get("OR_KEY_ENV"):
                                "anthropic/claude-haiku-4.5", os.environ["OR_KEY_ENV"],
                                {"HTTP-Referer":"https://axentx.ai","X-Title":"Surrogate-1"})))
 
+# ── ALWAYS-ON LOCAL FALLBACK: Ollama (no key needed, never rate-limits) ────
+# Last resort when ALL paid + free providers fail / out-of-credit / 429.
+# User feedback 2026-04-29: "ทุก agent ต้องทำงานตลอด" — never go silent.
+ladder.append(("ollama-local:qwen3-coder",
+    lambda: oai_compatible("http://127.0.0.1:11434/v1/chat/completions",
+                           "qwen3-coder:30b-a3b-instruct-q4_K_M", "ollama")))
+ladder.append(("ollama-local:qwen2.5-14b",
+    lambda: oai_compatible("http://127.0.0.1:11434/v1/chat/completions",
+                           "qwen2.5-coder:14b-instruct-q4_K_M", "ollama")))
+ladder.append(("ollama-local:granite",
+    lambda: oai_compatible("http://127.0.0.1:11434/v1/chat/completions",
+                           "granite-code:8b-instruct", "ollama")))
+ladder.append(("ollama-local:gemma",
+    lambda: oai_compatible("http://127.0.0.1:11434/v1/chat/completions",
+                           "gemma4:e4b", "ollama")))
+
 errors, out = [], ""
 for name, fn in ladder:
     try:
