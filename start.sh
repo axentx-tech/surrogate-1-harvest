@@ -39,9 +39,20 @@ if [[ -d "$DATA" ]] && [[ -w "$DATA" ]]; then
         target="${spec%%:*}"
         link="${spec##*:}"
         mkdir -p "$(dirname "$target")"
-        if [[ ! -L "$target" ]]; then
+        # Always ensure backing directory exists + writable. If the persistent
+        # /data mount becomes unavailable mid-run, daemon writes to symlinked
+        # path fail with Errno 5 I/O error (audit 2026-04-29). Recreating the
+        # link defensively each boot fixes stale-symlink cases.
+        mkdir -p "$link" 2>/dev/null || true
+        if [[ ! -L "$target" ]] || [[ ! -d "$target/" ]]; then
+            # Either not-a-symlink OR broken symlink (target unreachable)
             rm -rf "$target" 2>/dev/null
             ln -sfn "$link" "$target"
+        fi
+        # Final sanity probe — write a marker; if it fails, the persistent
+        # mount is broken regardless of the symlink, so log loudly.
+        if ! touch "$target/.boot-marker" 2>/dev/null; then
+            echo "[$(date +%H:%M:%S)] ⚠ FATAL: $target/ not writable — daemon log writes will Errno 5"
         fi
     done
 

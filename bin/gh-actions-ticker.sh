@@ -17,9 +17,10 @@ set -uo pipefail
 LOG="$HOME/.surrogate/logs/gh-actions-ticker.log"
 mkdir -p "$(dirname "$LOG")"
 
-TICK_SEC="${GH_TICK_SEC:-60}"    # MAX BURST: 60s. 5-dataset cap unlocked
-                                  # 640 commits/hr aggregate, retry-backoff
-                                  # absorbs anything above. Pedal to floor.
+TICK_SEC="${GH_TICK_SEC:-600}"   # Throttled 60s→600s (audit 2026-04-29):
+                                  # 60s burst piled 200 jobs vs free-tier 20-concurrent
+                                  # cap, 17h queue depth, zero completions. 600s lets
+                                  # the queue actually drain. Override via GH_TICK_SEC.
 
 dispatch() {
     local repo="$1"
