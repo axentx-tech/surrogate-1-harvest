@@ -113,6 +113,92 @@ def has_pii(text: str) -> bool:
     return bool(PII_RE.search(text or ""))
 
 
+# ── Optional NER + secrets scanners (lazy, fail-soft) ──────────────────
+# starpii (BigCode) — neural PII NER; better than regex for free-form text.
+# detect-secrets (Yelp) — entropy + plugin-based secret detector.
+# Both are optional dependencies; if unavailable we fall back to regex above.
+_starpii_pipeline = None
+_detect_secrets_collection = None
+
+
+def _load_starpii():
+    """Lazy-load BigCode/starpii pipeline. None on failure."""
+    global _starpii_pipeline
+    if _starpii_pipeline is not None:
+        return _starpii_pipeline if _starpii_pipeline is not False else None
+    try:
+        from transformers import pipeline  # type: ignore
+        _starpii_pipeline = pipeline(
+            "token-classification",
+            model="bigcode/starpii",
+            aggregation_strategy="simple",
+        )
+        return _starpii_pipeline
+    except Exception:
+        _starpii_pipeline = False  # sentinel: "tried, don't try again"
+        return None
+
+
+def starpii_pii_hits(text: str, threshold: float = 0.8) -> list[dict]:
+    """Return [{type, score, span}] for confidently-detected PII spans.
+    Empty list if starpii not installed or no hits.
+    """
+    pipe = _load_starpii()
+    if not pipe or not text:
+        return []
+    try:
+        hits = pipe(text[:4000])  # cap input for speed
+    except Exception:
+        return []
+    return [{"type": h["entity_group"], "score": float(h["score"]),
+             "span": text[h["start"]:h["end"]][:120]}
+            for h in hits if h.get("score", 0) >= threshold]
+
+
+def _load_detect_secrets():
+    """Lazy-load detect-secrets SecretsCollection. None on failure."""
+    global _detect_secrets_collection
+    if _detect_secrets_collection is not None:
+        return _detect_secrets_collection if _detect_secrets_collection is not False else None
+    try:
+        from detect_secrets import SecretsCollection  # type: ignore
+        from detect_secrets.settings import default_settings  # type: ignore
+        _detect_secrets_collection = (SecretsCollection, default_settings)
+        return _detect_secrets_collection
+    except Exception:
+        _detect_secrets_collection = False
+        return None
+
+
+def detect_secrets_hits(text: str) -> list[dict]:
+    """Return [{type, line}] for any secret detect-secrets finds.
+    Empty list if not installed or none detected.
+    """
+    loaded = _load_detect_secrets()
+    if not loaded or not text:
+        return []
+    SecretsCollection, default_settings = loaded
+    import tempfile, os
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    try:
+        os.write(fd, text.encode("utf-8", "ignore")[:200_000])
+        os.close(fd)
+        with default_settings():
+            sc = SecretsCollection()
+            sc.scan_file(path)
+        out = []
+        for _, secrets in sc.data.items():
+            for s in secrets:
+                out.append({"type": s.type, "line": s.line_number,
+                            "secret_hash": s.secret_hash[:16]})
+        return out
+    except Exception:
+        return []
+    finally:
+        try: os.unlink(path)
+        except OSError: pass
+
+
 # Quality heuristics — drop if response is too short, identical to prompt, etc.
 def is_low_quality(prompt: str, response: str) -> tuple[bool, str | None]:
     if not prompt or not response:
@@ -133,16 +219,37 @@ def is_low_quality(prompt: str, response: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def filter_pair(prompt: str, response: str) -> dict:
-    """Return verdict: {'keep': bool, 'reason': str|None, 'matched': str|None}"""
+def filter_pair(prompt: str, response: str,
+                deep_scan: bool = False) -> dict:
+    """Return verdict: {'keep': bool, 'reason': str|None, 'matched': str|None}.
+
+    deep_scan=True: also runs starpii NER + detect-secrets if installed.
+    Slow (model load + per-row scan) — use for the final pre-train pass,
+    not for every dedup row. Heuristic (regex) checks always run.
+    """
     polluted, p_match = is_polluted_pair(prompt, response)
     if polluted:
         return {"keep": False, "reason": "polluted", "matched": p_match}
     if has_pii(prompt) or has_pii(response):
-        return {"keep": False, "reason": "pii", "matched": None}
+        return {"keep": False, "reason": "pii_regex", "matched": None}
     low_q, lq_reason = is_low_quality(prompt, response)
     if low_q:
         return {"keep": False, "reason": f"low_quality:{lq_reason}", "matched": None}
+
+    if deep_scan:
+        # NER PII
+        for field, txt in (("prompt", prompt), ("response", response)):
+            hits = starpii_pii_hits(txt)
+            if hits:
+                return {"keep": False, "reason": f"pii_ner:{field}",
+                        "matched": str(hits[:3])[:300]}
+        # detect-secrets entropy/plugins
+        for field, txt in (("prompt", prompt), ("response", response)):
+            hits = detect_secrets_hits(txt)
+            if hits:
+                return {"keep": False, "reason": f"secrets:{field}",
+                        "matched": str(hits[:3])[:300]}
+
     return {"keep": True, "reason": None, "matched": None}
 
 
