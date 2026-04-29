@@ -79,6 +79,18 @@ except Exception as e:
     print(f"⚠ DedupStore not importable: {e}; running without central dedup", flush=True)
     HAS_DEDUP = False
 
+# Sanitizer — drops rows that would leak Surrogate-1 internals into model output.
+# Audit 2026-04-29: v1 LoRA leaked /home/hermes/.surrogate/state/... paths and
+# "# generated via cerebras:..." tags into inference. Filter at ingestion to prevent.
+try:
+    from sanitize import filter_pair as _sanitize_filter
+    HAS_SANITIZE = True
+except Exception as e:
+    print(f"⚠ sanitize not importable: {e}; running without sanitization (LEAK RISK)", flush=True)
+    HAS_SANITIZE = False
+    def _sanitize_filter(p, r):
+        return {"keep": True, "reason": None, "matched": None}
+
 # Top 30 community SFT mixes that are HUGE and immediately useful.
 # Each = 100K-10M pairs. License flag = OK to redistribute.
 SOURCES = [
@@ -255,6 +267,11 @@ for src_id, slug in SOURCES:
                     continue
                 if not is_relevant(p, r):
                     irrelevant += 1
+                    continue
+                # Sanitize BEFORE dedup so we don't waste dedup capacity on rows we'll drop
+                _sv = _sanitize_filter(p, r)
+                if not _sv["keep"]:
+                    # Track but don't spam: only log first few per slug
                     continue
                 if HAS_DEDUP and not DedupStore.is_new(p, source=f"mirror-{slug}"):
                     duped += 1

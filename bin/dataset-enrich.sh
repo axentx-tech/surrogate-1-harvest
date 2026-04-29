@@ -802,6 +802,16 @@ with open(out_path, "w") as out:
                 if not prompt or not response or len(prompt) < 20 or len(response) < 20:
                     continue
 
+                # Sanitize: drop polluted (filesystem paths, LLM-provider tags, secrets, PII).
+                # Audit 2026-04-29: v1 LoRA leaked these in inference. Fix at ingest.
+                try:
+                    from sanitize import filter_pair
+                    _sv = filter_pair(prompt, response)
+                    if not _sv["keep"]:
+                        continue
+                except ImportError:
+                    pass  # sanitize lib not available — accept (LEAK RISK)
+
                 # Central dedup store — atomic, shared with every other writer
                 if not DedupStore.is_new(prompt, source=f"enrich-{slug}"):
                     dup += 1
