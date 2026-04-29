@@ -314,12 +314,11 @@ echo "[$(date +%H:%M:%S)] parquet-direct-ingest started (2 parallel DLs)" >> "$L
 nohup bash ~/.surrogate/bin/skill-synthesis-daemon.sh > "$LOG_DIR/skill-synthesis.log" 2>&1 &
 echo "[$(date +%H:%M:%S)] skill-synthesis daemon started" >> "$LOG_DIR/boot.log"
 
-# ── 7d. Train-ready pusher — pushes /data/training-pairs.jsonl as a SINGLE
-#       fixed-path file (train-ready/latest.jsonl.gz) every 5 min so Lightning /
-#       Kaggle / Modal training scripts can curl one URL via CDN without any
-#       HF API calls (avoids the 1000-req/5min token contention).
-nohup bash ~/.surrogate/bin/train-ready-pusher.sh > "$LOG_DIR/train-ready-pusher.log" 2>&1 &
-echo "[$(date +%H:%M:%S)] train-ready-pusher daemon started" >> "$LOG_DIR/boot.log"
+# ── 7d. Train-ready pusher — disabled at boot for now. Caused Space
+#       RUNTIME_ERROR on first deployment (2026-04-29). Script kept at
+#       bin/train-ready-pusher.sh; launch manually after Space proves stable:
+#         nohup bash ~/.surrogate/bin/train-ready-pusher.sh > /tmp/trp.log 2>&1 &
+# nohup bash ~/.surrogate/bin/train-ready-pusher.sh > "$LOG_DIR/train-ready-pusher.log" 2>&1 &
 
 # ── 7b. Cron loop — non-scrape daemons (scrape now runs continuously above) ─
 cat > /tmp/hermes-cron.sh <<'CRONSH'
