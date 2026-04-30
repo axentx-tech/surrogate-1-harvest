@@ -37,44 +37,60 @@ echo "[$(date '+%H:%M:%S')] space=$SPACE_URL len=${#PROMPT}" >> "$LOG"
 RESPONSE=$(SPACE="$SPACE_URL" MAX_TOKENS="$MAX_TOKENS" TEMP="$TEMP" TOP_P="$TOP_P" \
     HF_TOKEN_USE="$HF_TOKEN_USE" \
 python3 -c "
-import json, os, sys, urllib.request, urllib.error
+import json, os, re, sys, urllib.request, urllib.error
 prompt = sys.stdin.read()
 space = os.environ['SPACE']
-# Gradio API call — chat fn signature: (user_msg, history, max_new_tokens, temperature, top_p)
-payload = {
-    'data': [
-        prompt,
-        [],
-        int(os.environ['MAX_TOKENS']),
-        float(os.environ['TEMP']),
-        float(os.environ['TOP_P']),
-    ],
-    'fn_index': 0,
-}
+# Gradio 4.44 with .queue() rejects POST /api/predict and POST
+# /run/<api_name> ('This API endpoint does not accept direct HTTP POST
+# requests. Please join the queue.') — must use /call/<api_name> with
+# event_id polling. The Space app.py exposes api_name='respond' for
+# the chat function (signature: respond(message) -> str).
 hdr = {'Content-Type':'application/json'}
 tok = os.environ.get('HF_TOKEN_USE','')
 if tok: hdr['Authorization'] = 'Bearer ' + tok
-req = urllib.request.Request(
-    f'{space}/api/predict', data=json.dumps(payload).encode(), headers=hdr)
+
+# Step 1: enqueue
 try:
-    with urllib.request.urlopen(req, timeout=180) as r:
-        d = json.load(r)
-    out = d.get('data', [''])
-    if isinstance(out, list) and out:
-        v = out[0]
-        if isinstance(v, list):
-            # Gradio chat returns history list-of-tuples
-            if v and isinstance(v[-1], (list,tuple)) and len(v[-1]) >= 2:
-                print(v[-1][1] or '')
-                sys.exit(0)
-        if isinstance(v, str):
-            print(v); sys.exit(0)
-    print(json.dumps(d)[:500], file=sys.stderr); sys.exit(1)
+    req = urllib.request.Request(
+        f'{space}/call/respond',
+        data=json.dumps({'data':[prompt]}).encode(), headers=hdr)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        eid = json.load(r).get('event_id','')
 except urllib.error.HTTPError as e:
-    print(f'zero-gpu-bridge HTTP {e.code}: {e.read().decode(\"utf-8\",\"ignore\")[:400]}', file=sys.stderr)
+    print(f'zero-gpu-bridge HTTP {e.code} (enqueue): {e.read().decode(\"utf-8\",\"ignore\")[:300]}', file=sys.stderr)
     sys.exit(1)
 except Exception as e:
-    print(f'zero-gpu-bridge error: {e}', file=sys.stderr); sys.exit(1)
+    print(f'zero-gpu-bridge enqueue error: {e}', file=sys.stderr); sys.exit(1)
+
+if not eid:
+    print('zero-gpu-bridge: no event_id', file=sys.stderr); sys.exit(1)
+
+# Step 2: poll SSE stream until 'event: complete'. Cold-start ~30-60s
+# for 7B+LoRA load; warm 5-15s for chat.
+try:
+    req = urllib.request.Request(f'{space}/call/respond/{eid}', headers=hdr)
+    with urllib.request.urlopen(req, timeout=240) as r:
+        body = r.read().decode('utf-8','ignore')
+    blocks = re.findall(r'event:\s*complete\s*\ndata:\s*(.*)', body)
+    if not blocks:
+        # surface error events when present
+        errs = re.findall(r'event:\s*error\s*\ndata:\s*(.*)', body)
+        if errs:
+            print(f'zero-gpu-bridge SSE error: {errs[-1][:300]}', file=sys.stderr)
+        else:
+            print(f'zero-gpu-bridge: no complete event in {len(body)}b', file=sys.stderr)
+        sys.exit(1)
+    payload = json.loads(blocks[-1])
+    out = payload[0] if isinstance(payload, list) and payload else ''
+    if isinstance(out, str):
+        print(out); sys.exit(0)
+    print(f'zero-gpu-bridge: unexpected payload {str(payload)[:200]}', file=sys.stderr)
+    sys.exit(1)
+except urllib.error.HTTPError as e:
+    print(f'zero-gpu-bridge HTTP {e.code} (poll): {e.read().decode(\"utf-8\",\"ignore\")[:300]}', file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f'zero-gpu-bridge poll error: {e}', file=sys.stderr); sys.exit(1)
 " <<< "$PROMPT")
 RC=$?
 echo "[$(date '+%H:%M:%S')] rc=$RC bytes=${#RESPONSE}" >> "$LOG"
