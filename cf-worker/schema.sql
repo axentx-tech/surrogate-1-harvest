@@ -23,3 +23,20 @@ CREATE TABLE IF NOT EXISTS datasets (
 
 CREATE INDEX IF NOT EXISTS idx_datasets_score ON datasets(score DESC);
 CREATE INDEX IF NOT EXISTS idx_cursors_updated ON cursors(updated_at);
+
+-- Round 1 additions (2026-05-02): exhaustion tracking + audit + metrics
+ALTER TABLE cursors ADD COLUMN exhausted INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    action      TEXT NOT NULL,
+    dataset_id  TEXT,
+    meta        TEXT,
+    ts          INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
+
+CREATE TABLE IF NOT EXISTS metrics (
+    key  TEXT PRIMARY KEY,
+    n    INTEGER NOT NULL DEFAULT 0
+);
