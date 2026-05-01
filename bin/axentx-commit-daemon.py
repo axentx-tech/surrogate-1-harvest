@@ -38,6 +38,25 @@ def do_one_commit() -> bool:
         fail(item, src_path, "commit", f"project repo missing: {repo}")
         return True
 
+    # ── Sync local clone with remote BEFORE writing — prevents the
+    # "fetch first" rejection we kept hitting when concurrent commit
+    # cycles (or external pushes) advanced origin while our local was
+    # behind. Pull rebases so our new commit lands cleanly on top.
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo), "fetch", "origin", "main"],
+            capture_output=True, text=True, timeout=20,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "rebase", "origin/main"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        log("commit", f"⚠ {item['id']} pre-push fetch/rebase timed out — proceeding anyway")
+    except Exception as _e:
+        # Network blip is not fatal — the actual push will retry below.
+        log("commit", f"  pre-sync warn: {_e}")
+
     # Drop the decision into the repo's .axentx-dev-bot/ folder
     target_dir = repo / ".axentx-dev-bot"
     target_dir.mkdir(exist_ok=True)
@@ -45,7 +64,7 @@ def do_one_commit() -> bool:
     target_md.write_text(render_decision_md(item))
     log("commit", f"▸ {item['id']} → wrote {target_md}")
 
-    # git add + commit + push
+    # git add + commit + push (push has retry-with-rebase loop)
     try:
         subprocess.run(["git", "-C", str(repo), "add",
                         str(target_md.relative_to(repo))],
@@ -59,12 +78,33 @@ def do_one_commit() -> bool:
         if r.returncode != 0:
             log("commit", f"  commit: {(r.stdout+r.stderr)[:200]}")
         else:
-            push = subprocess.run(["git", "-C", str(repo), "push", "origin", "HEAD"],
-                                  capture_output=True, text=True, timeout=60)
-            if push.returncode == 0:
-                log("commit", f"✓ {item['id']} pushed to {project}")
-            else:
+            # Push with one retry-after-rebase if we lose a race against a
+            # concurrent push. On success, log and move on. On hard failure
+            # (auth, branch protection, etc.) the markdown still landed
+            # locally and the queue advance will mark the item done.
+            push_ok = False
+            for attempt in range(2):
+                push = subprocess.run(
+                    ["git", "-C", str(repo), "push", "origin", "HEAD:main"],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if push.returncode == 0:
+                    push_ok = True
+                    log("commit", f"✓ {item['id']} pushed to {project}"
+                                  f"{' (retry)' if attempt else ''}")
+                    break
+                if "fetch first" in push.stderr or "non-fast-forward" in push.stderr:
+                    # Lost the race — pull, rebase our commit on top, retry.
+                    subprocess.run(
+                        ["git", "-C", str(repo), "pull", "--rebase", "origin", "main"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    continue
+                # Other failure: don't loop, log and stop.
                 log("commit", f"  push: {(push.stdout+push.stderr)[:200]}")
+                break
+            if not push_ok:
+                log("commit", f"  push: failed after {attempt+1} attempt(s)")
     except subprocess.TimeoutExpired:
         log("commit", f"⏱ {item['id']} push TIMEOUT")
     except Exception as e:
