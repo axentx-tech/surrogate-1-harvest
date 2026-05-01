@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 SECRETS.md
 *.note
+data/hermes-last-run.json
