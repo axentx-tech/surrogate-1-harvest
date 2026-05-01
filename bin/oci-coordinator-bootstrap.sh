@@ -58,7 +58,7 @@ OPENROUTER_API_KEY=
 ANTHROPIC_API_KEY=
 HF_TOKEN=
 DISCORD_WEBHOOK=
-TICK_INTERVAL_SEC=60
+TICK_INTERVAL_SEC=300
 ENVEOF
     chmod 600 "$ENV_FILE"
     echo "[bootstrap] ⚠ created $ENV_FILE — fill in keys, then 'sudo systemctl restart surrogate-coordinator'"

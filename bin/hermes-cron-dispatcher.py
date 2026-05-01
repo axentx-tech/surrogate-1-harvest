@@ -88,7 +88,7 @@ def save_last_run(state: dict) -> None:
     LAST_RUN_FILE.write_text(json.dumps(state, indent=2, default=str))
 
 
-def call_llm(prompt: str, max_tokens: int = 1024, timeout: int = 60) -> str:
+def call_llm(prompt: str, max_tokens: int = 1024, timeout: int = 20) -> str:
     """Free-tier LLM call. Tries Cerebras → Groq → OpenRouter."""
     chains = [
         ("Cerebras", "https://api.cerebras.ai/v1/chat/completions",
@@ -173,12 +173,12 @@ def execute_job(job: dict) -> tuple[bool, str]:
         try:
             r = subprocess.run(
                 ["bash", "-c", cmd],
-                capture_output=True, text=True, timeout=600, env=env,
+                capture_output=True, text=True, timeout=30, env=env,
                 cwd=str(REPO_ROOT),
             )
             return r.returncode == 0, (r.stdout + r.stderr)[:4000]
         except subprocess.TimeoutExpired:
-            return False, "TIMEOUT after 600s"
+            return False, "TIMEOUT after 30s"
         except Exception as e:
             return False, f"EXEC ERROR: {e}"
 
