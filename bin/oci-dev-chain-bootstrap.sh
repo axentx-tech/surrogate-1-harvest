@@ -34,14 +34,17 @@ chown -R "$DEV_USER:$DEV_USER" "$AXENTX_ROOT"
 ARK_TOK="${GITHUB_TOKEN_ARKASHIRA:-${GITHUB_TOKEN:-}}"
 AX_TOK="${GITHUB_TOKEN_AXENTX:-$ARK_TOK}"
 
+# GitHub PAT format requires 'x-access-token' as the URL user, not the
+# org/user name. With the bare org name, GitHub returns:
+#   "Invalid username or token. Password authentication is not supported"
 declare -A REPOS=(
-    [Costinel]="https://arkashira:${ARK_TOK}@github.com/arkashira/Costinel.git"
-    [Vanguard]="https://arkashira:${ARK_TOK}@github.com/arkashira/vanguard.git"
-    [arkship]="https://arkashira:${ARK_TOK}@github.com/arkashira/arkship.git"
-    [surrogate]="https://arkashira:${ARK_TOK}@github.com/arkashira/surrogate.git"
-    [workio]="https://arkashira:${ARK_TOK}@github.com/arkashira/workio.git"
-    [axiomops]="https://AXENTX:${AX_TOK}@github.com/AXENTX/axiomops.git"
-    [surrogate-1]="https://AXENTX:${AX_TOK}@github.com/AXENTX/surrogate-1.git"
+    [Costinel]="https://x-access-token:${ARK_TOK}@github.com/arkashira/Costinel.git"
+    [Vanguard]="https://x-access-token:${ARK_TOK}@github.com/arkashira/vanguard.git"
+    [arkship]="https://x-access-token:${ARK_TOK}@github.com/arkashira/arkship.git"
+    [surrogate]="https://x-access-token:${ARK_TOK}@github.com/arkashira/surrogate.git"
+    [workio]="https://x-access-token:${ARK_TOK}@github.com/arkashira/workio.git"
+    [axiomops]="https://x-access-token:${AX_TOK}@github.com/AXENTX/axiomops.git"
+    [surrogate-1]="https://x-access-token:${AX_TOK}@github.com/AXENTX/surrogate-1.git"
 )
 
 for proj in "${!REPOS[@]}"; do
