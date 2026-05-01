@@ -89,7 +89,12 @@ while True:
             n_cooldown += 1
             continue
         sub = sp.replace("/", "-")  # axentx/surrogate-1 → axentx-surrogate-1
-        url = f"https://{sub}.hf.space/"
+        # Prefer /health over / — heavily-loaded Spaces queue root path behind
+        # all the worker traffic, so / can timeout even when the app is alive
+        # and serving real endpoints. /health is a known-cheap path (the
+        # Hermes status server returns it in <2s even under load). Spaces
+        # without /health will fall through to root via the 404 handling below.
+        url = f"https://{sub}.hf.space/health"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA_BROWSER})
             # 20s timeout — Spaces waking from sleep can take 10-15s to
@@ -100,7 +105,12 @@ while True:
                 else:
                     issues.append(f"⚠ {sp} HTTP {r.status} on {url}")
         except urllib.error.HTTPError as e:
-            if e.code == 429:
+            if e.code == 404:
+                # /health route doesn't exist on this Space — but the app DID
+                # respond (with 404), so the container is alive. That's the
+                # signal we actually care about. Count as RUNNING.
+                n_running += 1
+            elif e.code == 429:
                 _repo_cooldown[sp] = time.time() + COOLDOWN_SEC
                 n_cooldown += 1
             elif e.code in (502, 503, 504):
