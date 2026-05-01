@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Daily Sprint Planning — runs 01:30 via pipe-sprint-plan cron. Uses Opus (night window).
 set -u
-SHARED="$HOME/.hermes/workspace/swarm-shared"
+SHARED="/opt/surrogate-1-harvest/state/swarm-shared"
 DATE=$(date +%Y%m%d)
 OUT="$SHARED/sprint/${DATE}_plan.md"
 mkdir -p "$(dirname "$OUT")"
@@ -57,7 +57,7 @@ Be concise. Focus on moving real product work forward in revenue projects.
 END
 )
 
-echo "[$(date +%H:%M)] sprint planning starting" >> "$HOME/.claude/logs/claude-bridge.log"
+echo "[$(date +%H:%M)] sprint planning starting" >> "/opt/surrogate-1-harvest/logs/claude-bridge.log"
 # Sprint planning = important task → Opus 4.7 (force-bypass night window if off-hours)
 RESPONSE=$(echo "$PROMPT" | /opt/surrogate-1-harvest/bin/claude-bridge.sh --model opus --force --timeout 300)
 RC=$?

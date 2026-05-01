@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Quick re-prioritization every 2 hours. Fast, focused on what's shippable next.
 set -u
-SHARED="$HOME/.hermes/workspace/swarm-shared"
+SHARED="/opt/surrogate-1-harvest/state/swarm-shared"
 DATE=$(date +%Y%m%d_%H%M)
 OUT="$SHARED/sprint/mini_${DATE}.md"
-LOG="$HOME/.claude/logs/claude-mini-sprint.log"
+LOG="/opt/surrogate-1-harvest/logs/claude-mini-sprint.log"
 mkdir -p "$(dirname "$OUT")" "$(dirname "$LOG")"
 
 # Latest state

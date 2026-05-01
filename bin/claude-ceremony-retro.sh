@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Daily Retrospective — runs 05:30 via pipe-retro cron. Uses Opus (night window).
 set -u
-SHARED="$HOME/.hermes/workspace/swarm-shared"
+SHARED="/opt/surrogate-1-harvest/state/swarm-shared"
 DATE=$(date +%Y%m%d)
 YESTERDAY=$(date -v-1d +%Y%m%d)
 OUT="$SHARED/retro/${DATE}_retro.md"
@@ -59,7 +59,7 @@ Be brutally honest. Flag hallucination patterns. Revenue tier (Cost/Van/ark) get
 END
 )
 
-echo "[$(date +%H:%M)] retro starting" >> "$HOME/.claude/logs/claude-bridge.log"
+echo "[$(date +%H:%M)] retro starting" >> "/opt/surrogate-1-harvest/logs/claude-bridge.log"
 # Retrospective = important task → Opus 4.7 explicitly (bypass night-gate if triggered outside 01-06)
 RESPONSE=$(echo "$PROMPT" | /opt/surrogate-1-harvest/bin/claude-bridge.sh --model opus --force --timeout 300)
 RC=$?

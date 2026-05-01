@@ -1,0 +1,96 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-23T14:16:07.763214Z",
+  "total_chains": 8,
+  "cross_project_chains": 8,
+  "chains": [
+    {
+      "producer": "p40",
+      "producer_project": "surrogate",
+      "producer_status": "ready",
+      "consumer": "p34",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "POST /v1/chat/completions (OpenAI-compat on vLLM)",
+      "score_boost": 2,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p37",
+      "producer_project": "arkship",
+      "producer_status": "ready",
+      "consumer": "p24",
+      "consumer_project": "Costinel",
+      "consumer_status": "ready",
+      "surface": "namespace_costs table",
+      "score_boost": 1,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p14",
+      "producer_project": "Vanguard",
+      "producer_status": "ready",
+      "consumer": "p34",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "IOC match alert \u2192 Temporal preset trigger",
+      "score_boost": 2,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p15",
+      "producer_project": "Vanguard",
+      "producer_status": "ready",
+      "consumer": "p3",
+      "consumer_project": "arkship",
+      "consumer_status": "superseded_by_p36",
+      "surface": "cosign verify subprocess pattern (share Dockerfile install)",
+      "score_boost": 1,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p15",
+      "producer_project": "Vanguard",
+      "producer_status": "ready",
+      "consumer": "p32",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "cosign verify subprocess pattern (share Dockerfile install)",
+      "score_boost": 1,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p15",
+      "producer_project": "Vanguard",
+      "producer_status": "ready",
+      "consumer": "p36",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "cosign verify subprocess pattern (share Dockerfile install)",
+      "score_boost": 1,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p20",
+      "producer_project": "Costinel",
+      "producer_status": "ready",
+      "consumer": "p37",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "FOCUS v1.2 row format (shared data contract)",
+      "score_boost": 1,
+      "source": "hand-curated"
+    },
+    {
+      "producer": "p13",
+      "producer_project": "Vanguard",
+      "producer_status": "ready",
+      "consumer": "p33",
+      "consumer_project": "arkship",
+      "consumer_status": "ready",
+      "surface": "Sigma rule match event \u2192 runbook lookup key",
+      "score_boost": 1,
+      "source": "hand-curated"
+    }
+  ]
+}

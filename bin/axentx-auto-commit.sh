@@ -4,8 +4,8 @@
 # Only commits REAL code changes (skips noise like test_output, data/, node_modules).
 
 set -u
-LOG="$HOME/.claude/logs/axentx-dev-loop.log"
-AXENTX="/Users/Ashira/axentx"
+LOG="/opt/surrogate-1-harvest/logs/axentx-dev-loop.log"
+AXENTX="/opt/axentx"
 PROJECTS=(Costinel Vanguard arkship surrogate workio)
 
 # Paths we skip (not user code)

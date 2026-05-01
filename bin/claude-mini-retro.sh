@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Quick retro on last 3 hours — fast adaptation. Sonnet for speed.
 set -u
-SHARED="$HOME/.hermes/workspace/swarm-shared"
+SHARED="/opt/surrogate-1-harvest/state/swarm-shared"
 DATE=$(date +%Y%m%d_%H%M)
 OUT="$SHARED/retro/mini_${DATE}.md"
-LOG="$HOME/.claude/logs/claude-mini-retro.log"
+LOG="/opt/surrogate-1-harvest/logs/claude-mini-retro.log"
 mkdir -p "$(dirname "$OUT")" "$(dirname "$LOG")"
 
 # Gather data from last 3 hours

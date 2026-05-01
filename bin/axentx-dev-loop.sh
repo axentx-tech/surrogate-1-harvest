@@ -25,10 +25,10 @@ ROTATION=(
     "arkship"
     "workio"
 )
-AXENTX="/Users/Ashira/axentx"
-STATE_FILE="$HOME/.hermes/state/axentx-dev-cursor.txt"
-LOG="$HOME/.claude/logs/axentx-dev-loop.log"
-SHARED="$HOME/.hermes/workspace/swarm-shared"
+AXENTX="/opt/axentx"
+STATE_FILE="/opt/surrogate-1-harvest/state/axentx-dev-cursor.txt"
+LOG="/opt/surrogate-1-harvest/logs/axentx-dev-loop.log"
+SHARED="/opt/surrogate-1-harvest/state/swarm-shared"
 
 mkdir -p "$(dirname "$STATE_FILE")"
 mkdir -p "$(dirname "$LOG")"
