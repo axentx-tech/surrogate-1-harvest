@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""hermes-cron dispatcher — runs as GitHub Actions cron tick.
+
+Replaces the dead Mac hermes-gateway daemon (stopped 2026-04-27).
+Reads jobs.json, picks jobs whose schedule matches current minute,
+dispatches LLM-prompt jobs to a free-tier API rotation.
+
+Triggered by .github/workflows/hermes-cron-dispatcher.yml (every 5 min).
+
+Cron parsing follows POSIX 5-field format: minute hour dom month dow
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import datetime
+import subprocess
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+JOBS_FILE = REPO_ROOT / "data" / "hermes-jobs.json"
+LAST_RUN_FILE = REPO_ROOT / "data" / "hermes-last-run.json"
+LOG_DIR = Path(os.environ.get("HOME", "/tmp")) / ".surrogate" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / "hermes-cron-dispatcher.log"
+
+
+def log(msg: str) -> None:
+    line = f"[{datetime.datetime.utcnow().isoformat()}Z] {msg}"
+    print(line)
+    with LOG_FILE.open("a") as f:
+        f.write(line + "\n")
+
+
+def cron_match(expr: str, now: datetime.datetime) -> bool:
+    """Match a 5-field cron expression against datetime. Supports *, lists, ranges, */N."""
+    fields = expr.strip().split()
+    if len(fields) != 5:
+        return False
+    minute, hour, dom, month, dow = fields
+    return (
+        _cron_field_match(minute, now.minute, 0, 59) and
+        _cron_field_match(hour, now.hour, 0, 23) and
+        _cron_field_match(dom, now.day, 1, 31) and
+        _cron_field_match(month, now.month, 1, 12) and
+        _cron_field_match(dow, now.isoweekday() % 7, 0, 6)
+    )
+
+
+def _cron_field_match(field: str, value: int, lo: int, hi: int) -> bool:
+    if field == "*":
+        return True
+    for part in field.split(","):
+        if "/" in part:
+            base, step = part.split("/", 1)
+            if base == "*":
+                if value % int(step) == 0:
+                    return True
+            else:
+                start = int(base.split("-")[0])
+                if (value - start) % int(step) == 0:
+                    return True
+        elif "-" in part:
+            a, b = part.split("-", 1)
+            if int(a) <= value <= int(b):
+                return True
+        else:
+            if int(part) == value:
+                return True
+    return False
+
+
+def load_last_run() -> dict:
+    if LAST_RUN_FILE.exists():
+        try:
+            return json.loads(LAST_RUN_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_last_run(state: dict) -> None:
+    LAST_RUN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LAST_RUN_FILE.write_text(json.dumps(state, indent=2, default=str))
+
+
+def call_llm(prompt: str, max_tokens: int = 1024, timeout: int = 60) -> str:
+    """Free-tier LLM call. Tries Cerebras → Groq → OpenRouter."""
+    chains = [
+        ("Cerebras", "https://api.cerebras.ai/v1/chat/completions",
+         os.environ.get("CEREBRAS_API_KEY"), "llama-3.3-70b"),
+        ("Groq", "https://api.groq.com/openai/v1/chat/completions",
+         os.environ.get("GROQ_API_KEY"), "llama-3.3-70b-versatile"),
+        ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions",
+         os.environ.get("OPENROUTER_API_KEY"),
+         "deepseek/deepseek-chat-v3.1:free"),
+    ]
+    payload = {
+        "messages": [{"role": "user", "content": prompt[:8000]}],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+    }
+    last_err = None
+    for name, url, key, model in chains:
+        if not key:
+            continue
+        body = dict(payload, model=model)
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode(),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "User-Agent": "hermes-cron-dispatcher/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+                content = data["choices"][0]["message"]["content"]
+                log(f"  → {name}/{model}: {len(content)} chars returned")
+                return content
+        except (urllib.error.HTTPError, urllib.error.URLError, KeyError, TimeoutError) as e:
+            last_err = f"{name}: {e}"
+            continue
+    raise RuntimeError(f"all LLM providers failed; last={last_err}")
+
+
+def execute_job(job: dict) -> tuple[bool, str]:
+    """Run a single hermes-cron job. Returns (success, output)."""
+    job_id = job.get("id", "?")
+    name = job.get("name", "unnamed")
+    log(f"  ▸ executing job {job_id} '{name}'")
+
+    # Job has a script field (shell-driven)
+    script = job.get("script")
+    if script:
+        try:
+            r = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True, text=True, timeout=600,
+            )
+            return r.returncode == 0, (r.stdout + r.stderr)[:4000]
+        except subprocess.TimeoutExpired:
+            return False, "TIMEOUT after 600s"
+        except Exception as e:
+            return False, f"EXEC ERROR: {e}"
+
+    # Job has a prompt field (LLM-driven)
+    prompt = job.get("prompt", "")
+    if not prompt:
+        return False, "no script or prompt field"
+    try:
+        out = call_llm(prompt, max_tokens=1024)
+        return True, out[:4000]
+    except Exception as e:
+        return False, f"LLM call failed: {e}"
+
+
+def main() -> int:
+    if not JOBS_FILE.exists():
+        log(f"✗ jobs file not found: {JOBS_FILE}")
+        return 1
+    try:
+        data = json.loads(JOBS_FILE.read_text())
+        jobs = data.get("jobs", []) if isinstance(data, dict) else data
+    except Exception as e:
+        log(f"✗ failed to parse jobs.json: {e}")
+        return 1
+
+    # GitHub Actions schedules can drift up to 15 min — we tolerate jobs whose
+    # schedule fired within the last 5 minutes (matches our workflow tick).
+    now = datetime.datetime.utcnow()
+    last_run = load_last_run()
+    fired = []
+    skipped_recent = 0
+    for job in jobs:
+        if not job.get("enabled", True):
+            continue
+        sched = job.get("schedule", {})
+        expr = sched.get("expr") if isinstance(sched, dict) else sched
+        if not expr:
+            continue
+
+        # Match against current minute or any of the past 5 minutes
+        match = False
+        for delta in range(0, 6):
+            t = now - datetime.timedelta(minutes=delta)
+            if cron_match(expr, t):
+                match = True
+                break
+        if not match:
+            continue
+
+        # Dedupe — don't run the same job twice within 4 minutes
+        job_id = job.get("id", job.get("name", "?"))
+        last = last_run.get(job_id)
+        if last:
+            last_dt = datetime.datetime.fromisoformat(last)
+            if (now - last_dt).total_seconds() < 240:
+                skipped_recent += 1
+                continue
+        fired.append(job)
+
+    log(f"=== tick @ {now.isoformat()}Z — {len(jobs)} jobs total, "
+        f"{len(fired)} due, {skipped_recent} dedup-skipped ===")
+
+    successes = failures = 0
+    for job in fired:
+        ok, output = execute_job(job)
+        job_id = job.get("id", job.get("name", "?"))
+        last_run[job_id] = now.isoformat()
+        if ok:
+            successes += 1
+            log(f"    ✓ {job_id}: ok ({len(output)} chars)")
+        else:
+            failures += 1
+            log(f"    ✗ {job_id}: {output[:200]}")
+
+    save_last_run(last_run)
+    log(f"=== tick done — {successes} ok, {failures} fail ===")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
