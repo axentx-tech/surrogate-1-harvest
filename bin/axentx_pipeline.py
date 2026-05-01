@@ -81,7 +81,10 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
-                "User-Agent": "axentx-pipeline/1.0",
+                # Cerebras sits behind Cloudflare which 403s/1010 unknown UAs
+                # when payload contains non-ASCII (Thai, emoji). Use a
+                # browser-style UA so the WAF lets us through.
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             },
         )
         try:
