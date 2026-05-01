@@ -489,7 +489,7 @@ with open(out_path, "w") as out:
         # POST advance so the next runner picks up where this one left off.
         try:
             import urllib.request as _urllib_req, json as _json
-            _cur_url = f"https://axentx-surrogate-1.hf.space/cursor/{slug}"
+            _cur_url = f"{os.environ.get('CURSOR_SERVICE_URL', 'https://surrogate-1-cursor.ashira.workers.dev')}/cursor/{slug}"
             with _urllib_req.urlopen(_cur_url, timeout=8) as _r:
                 _cur_data = _json.loads(_r.read())
             cursor_offset = int(_cur_data.get("offset", 0))
@@ -836,7 +836,7 @@ with open(out_path, "w") as out:
             if total > 0:
                 try:
                     import urllib.request as _u, json as _j
-                    _adv_url = f"https://axentx-surrogate-1.hf.space/cursor/{slug}/advance"
+                    _adv_url = f"{os.environ.get('CURSOR_SERVICE_URL', 'https://surrogate-1-cursor.ashira.workers.dev')}/cursor/{slug}/advance"
                     _req = _u.Request(_adv_url, method="POST",
                                        data=_j.dumps({"n": total}).encode(),
                                        headers={"Content-Type": "application/json"})

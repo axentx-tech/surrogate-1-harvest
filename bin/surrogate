@@ -349,7 +349,7 @@ def llm(messages):
     def try_hf_hermes():
         # Delegate to Hermes brain on HF Space — runs full orchestration there.
         # Requires HF_HERMES_URL env (default: axentx/surrogate-1 public endpoint)
-        url = os.environ.get('HF_HERMES_URL', 'https://axentx-surrogate-1.hf.space/chat')
+        url = os.environ.get('HF_HERMES_URL', os.environ.get('CURSOR_SERVICE_URL', 'https://surrogate-1-cursor.ashira.workers.dev')) + '/chat'
         # Build a single user prompt from messages (HF endpoint expects flat prompt)
         user_msg = next((m['content'] for m in reversed(messages) if m['role']=='user'), '')
         sys_msg = next((m['content'] for m in messages if m['role']=='system'), '')
@@ -561,7 +561,7 @@ repl() {
             /init) init_project ;;
             /health)
                 echo "${B}HF endpoint:${R}"
-                curl -sS -m 8 https://axentx-surrogate-1.hf.space/health 2>&1 | head -3
+                curl -sS -m 8 "${CURSOR_SERVICE_URL:-https://surrogate-1-cursor.ashira.workers.dev}/health" 2>&1 | head -3
                 echo "${B}Local CLI:${R} ${GR}✓${R} surrogate v$(grep '"Surrogate-1' "$0" | head -1 | grep -oE 'v[0-9.]+')"
                 ;;
             /auto|/auto-dev)
