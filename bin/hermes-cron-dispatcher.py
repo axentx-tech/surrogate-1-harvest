@@ -241,30 +241,41 @@ def main() -> int:
     log(f"=== tick @ {now.isoformat()}Z — {len(jobs)} jobs total, "
         f"{len(fired)} due, {skipped_recent} dedup-skipped ===")
 
-    # Parallel execution. With 21–31 jobs/tick × 3–5s/job serial = 90–150s,
-    # blowing past the 55s coordinator-loop kill. 8 workers means ~3–4s
-    # wall-clock for a typical batch.
+    # Parallel execution. With 25–31 jobs/tick × 30s job-cap × 8 workers =
+    # ~120s pessimal wall-clock. Budget = TICK_INTERVAL_SEC - 5 (loop kill).
+    # Use TICK-30 as as_completed deadline so we have time to log unfinished.
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    successes = failures = 0
+    from concurrent.futures import TimeoutError as FuturesTimeout
+    tick_budget = int(os.environ.get("TICK_INTERVAL_SEC", "300"))
+    deadline = max(60, tick_budget - 30)
+    successes = failures = unfinished = 0
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(execute_job, j): j for j in fired}
-        for fut in as_completed(futures, timeout=50):
-            job = futures[fut]
-            job_id = job.get("id", job.get("name", "?"))
-            try:
-                ok, output = fut.result()
-            except Exception as e:
-                ok, output = False, f"exec exception: {e}"
-            last_run[job_id] = now.isoformat()
-            if ok:
-                successes += 1
-                log(f"    ✓ {job_id}: ok ({len(output)} chars)")
-            else:
-                failures += 1
-                log(f"    ✗ {job_id}: {output[:200]}")
+        try:
+            for fut in as_completed(futures, timeout=deadline):
+                job = futures[fut]
+                job_id = job.get("id", job.get("name", "?"))
+                try:
+                    ok, output = fut.result()
+                except Exception as e:
+                    ok, output = False, f"exec exception: {e}"
+                last_run[job_id] = now.isoformat()
+                if ok:
+                    successes += 1
+                    log(f"    ✓ {job_id}: ok ({len(output)} chars)")
+                else:
+                    failures += 1
+                    log(f"    ✗ {job_id}: {output[:200]}")
+        except FuturesTimeout:
+            for fut, job in futures.items():
+                if not fut.done():
+                    unfinished += 1
+                    job_id = job.get("id", job.get("name", "?"))
+                    log(f"    ⏱ {job_id}: still running at {deadline}s deadline — abandoning")
+                    fut.cancel()
 
     save_last_run(last_run)
-    log(f"=== tick done — {successes} ok, {failures} fail ===")
+    log(f"=== tick done — {successes} ok, {failures} fail, {unfinished} unfinished ===")
     return 0
 
 
