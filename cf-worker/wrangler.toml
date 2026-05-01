@@ -1,0 +1,14 @@
+# Wrangler config (for local dev / npx wrangler deploy compatibility)
+name = "surrogate-1-cursor"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+account_id = "77fb5e6c3716be794dc3e8467ba9f285"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "surrogate-1-cursor"
+database_id = "ae95ac58-7b7e-40d9-8708-518c23281ae6"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "3e334007e0cd472493616f8c67337270"
