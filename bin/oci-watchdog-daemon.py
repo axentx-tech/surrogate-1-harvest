@@ -70,24 +70,48 @@ sweep_n = 0
 while True:
     sweep_n += 1
     issues = []
-    # 1. HF Spaces — sleep INTER_REQUEST_SLEEP between calls so we don't
-    # burst 6 requests in <1s (HF rate-limit smoothing).
+    # 1. HF Spaces — probe the running container subdomain directly instead
+    # of calling huggingface.co/api/*. Why:
+    #   - api.huggingface.co rate-limits per IP and we sit behind GCP free
+    #     tier shared NAT, where thousands of other users contribute to the
+    #     same IP's quota → routine 429 even with Mozilla UA + auth.
+    #   - <owner>-<name>.hf.space is served by a different edge tier (the
+    #     Space's own container/proxy), no global rate limit; HTTP 200 on
+    #     the root path tells us the app is up. 503/timeout = down.
+    # We still keep INTER_REQUEST_SLEEP + per-repo cooldown as defense in
+    # depth in case the subdomain edge ever throttles too.
     n_running = 0
     n_cooldown = 0
     for i, sp in enumerate(SPACES):
         if i > 0:
             time.sleep(INTER_REQUEST_SLEEP)
-        d = get_json(f"https://huggingface.co/api/spaces/{sp}", repo_key=sp)
-        if "_error" in d:
-            err = d["_error"]
-            if err.startswith("cooldown "):
-                n_cooldown += 1
-                continue  # don't spam Discord during cooldown
-            issues.append(f"HF API fail for {sp}: {err}")
+        if _repo_cooldown.get(sp, 0) > time.time():
+            n_cooldown += 1
             continue
-        stage = d.get("runtime", {}).get("stage", "?")
-        if stage == "RUNNING": n_running += 1
-        else: issues.append(f"⚠ {sp} stage={stage}")
+        sub = sp.replace("/", "-")  # axentx/surrogate-1 → axentx-surrogate-1
+        url = f"https://{sub}.hf.space/"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA_BROWSER})
+            # 20s timeout — Spaces waking from sleep can take 10-15s to
+            # reply on first request after idle.
+            with urllib.request.urlopen(req, timeout=20) as r:
+                if 200 <= r.status < 400:
+                    n_running += 1
+                else:
+                    issues.append(f"⚠ {sp} HTTP {r.status} on {url}")
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                _repo_cooldown[sp] = time.time() + COOLDOWN_SEC
+                n_cooldown += 1
+            elif e.code in (502, 503, 504):
+                # Space asleep / restarting — this IS a real status signal,
+                # but very common (Spaces auto-sleep after 48h idle). Surface
+                # it but don't escalate to ERROR color.
+                issues.append(f"⚠ {sp} stage=SLEEPING (HTTP {e.code})")
+            else:
+                issues.append(f"HF probe fail for {sp}: HTTP {e.code}")
+        except Exception as e:
+            issues.append(f"HF probe fail for {sp}: {type(e).__name__}: {str(e)[:80]}")
     # 2. Coordinator (if env set)
     if COORD_HOST:
         try:
