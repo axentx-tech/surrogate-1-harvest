@@ -183,6 +183,35 @@ def _cooldown(name: str, sec: float | None = None) -> None:
     _PROVIDER_COOLDOWN[name] = time.time() + sec
 
 
+def _call_codespace_ollama(messages: list, max_tokens: int, timeout: int) -> str:
+    """GH Codespace running ollama (Qwen2.5-Coder-7B 4-bit) — deepest free
+    fallback that doesn't depend on any external rate-limited provider.
+
+    URL via env CODESPACE_LLM_URL (e.g.
+      https://ollama-llm-proxy-xxx-11434.app.github.dev). Codespace owner
+    sets the port visibility to 'public' once via gh CLI:
+      gh codespace ports visibility 11434:public -c <name>
+
+    Codespace auto-stops after 30min idle to preserve free quota. First
+    call after wake-up takes ~30-60s for container restart + model load;
+    subsequent calls are 2-5s.
+    """
+    base = os.environ.get("CODESPACE_LLM_URL", "")
+    if not base:
+        raise RuntimeError("no CODESPACE_LLM_URL")
+    model = os.environ.get("CODESPACE_LLM_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
+    url = base.rstrip("/") + "/v1/chat/completions"
+    body = {"model": model, "messages": messages,
+            "max_tokens": max_tokens, "temperature": 0.3}
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": UA_BROWSER},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.loads(r.read())
+    return d["choices"][0]["message"]["content"]
+
+
 def _hf_inference(messages: list, max_tokens: int, timeout: int,
                   model: str | None = None) -> str:
     """Hugging Face Serverless Inference Router — uses 3rd-party providers
@@ -319,8 +348,8 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
                 _cooldown("CF-AI", 60)
                 last_err = f"CF-AI/{cf_model}: {e} (after {last_err})"
 
-    # HF Serverless Inference API (Llama-3.1-70B) — 10th provider, free tier
-    # ~1k req/h, separate budget from everything above.
+    # HF Serverless Inference API (Ling-2.6-1T) — 10th provider, free tier
+    # 1T-param model on Novita via HF Router, separate budget.
     if _provider_ready("HF-Inference"):
         try:
             return _hf_inference(messages, max_tokens, timeout)
@@ -331,6 +360,18 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
         except Exception as e:
             _cooldown("HF-Inference", 60)
             last_err = f"HF-Inference: {e} (after {last_err})"
+
+    # Codespace ollama (Qwen2.5-Coder-7B 4-bit) — IP-distinct from CF/GCP,
+    # owns its own GPU-less budget. Used when everything above hits limits.
+    if _provider_ready("Codespace-LLM") and os.environ.get("CODESPACE_LLM_URL"):
+        try:
+            return _call_codespace_ollama(messages, max_tokens, max(timeout, 60))
+        except urllib.error.HTTPError as e:
+            _cooldown("Codespace-LLM", _COOLDOWN_DEFAULT)
+            last_err = f"Codespace-LLM: HTTP {e.code} (after {last_err})"
+        except Exception as e:
+            _cooldown("Codespace-LLM", 120)
+            last_err = f"Codespace-LLM: {e} (after {last_err})"
 
     # Gemini (different API shape — handled separately)
     if _provider_ready("Gemini"):
