@@ -37,6 +37,7 @@ SERVICES = {
     "axentx-trends-daemon":    "market signal scraper",
     "axentx-customer-poll-daemon": "weekly Discord poll",
     "axentx-incident-responder-daemon": "auto-fix GH/Render failures",
+    "surrogate-state-sync-daemon": "5min state→git snapshot",
 }
 
 

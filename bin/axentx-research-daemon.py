@@ -81,9 +81,13 @@ this hurt, how much money/time it wastes, how many people share it.\nGROUNDING: 
 
 def fetch_reddit(sub: str) -> list[dict]:
     """Reddit blocks datacenter UA on www; old.reddit + RSS often slips through.
-    Try in order: old.reddit JSON → RSS feed. Fallback empty on full block."""
+    Try in order: old.reddit JSON → RSS feed. Fallback empty on full block.
+
+    Browser UA (not 'Surrogate1Bot/...') because Reddit's anti-scrape
+    aggressively 403s any non-browser ID even with proper reddit:bot
+    spec. We're a polite reader (low rate, no auth) — not abuse."""
     headers = {
-        "User-Agent": f"Surrogate1Bot/0.1 by axentx (worker-{WORKER_ID})",
+        "User-Agent": UA,  # browser UA defined at module top
         "Accept": "application/json",
     }
     posts = []
@@ -268,10 +272,13 @@ def do_one_cycle() -> bool:
             log(f"research-{WORKER_ID}", f"  ✗ {name}: {type(e).__name__}: {str(e)[:80]}")
             time.sleep(2)
             continue
+        n_total = len(posts)
+        n_dup = 0; n_seen = 0; n_rejected = 0; n_low_sev = 0; n_dedupe = 0
 
         for post in posts:
             fp = post_fingerprint(post)
             if fp in seen:
+                n_seen += 1
                 continue
             seen.add(fp)
 
@@ -299,9 +306,11 @@ def do_one_cycle() -> bool:
                 continue
 
             if not verdict.get("is_real_pain"):
+                n_rejected += 1
                 continue
-            if verdict.get("severity", 0) < 5:
-                continue  # noise filter
+            if verdict.get("severity", 0) < 4:
+                n_low_sev += 1
+                continue  # noise filter (was 5, lowered 2026-05-02)
 
             # Dedup against the RAG corpus — if a near-identical pain has
             # been mined before, skip rather than re-running the whole
@@ -310,6 +319,7 @@ def do_one_cycle() -> bool:
             if pain_text:
                 sim = rag_top_score(pain_text, kind="pain")
                 if sim >= DEDUP_SIM_THRESHOLD:
+                    n_dedupe += 1
                     log(f"research-{WORKER_ID}",
                         f"  ⤳ dedup (sim {sim:.2f}≥{DEDUP_SIM_THRESHOLD}): "
                         f"{pain_text[:60]}")
@@ -343,6 +353,11 @@ def do_one_cycle() -> bool:
                 f"disc={discovery_id[:8]}): "
                 f"{verdict.get('pain_one_liner','')[:70]}")
             fired += 1
+
+        log(f"research-{WORKER_ID}",
+            f"  source {name}: total={n_total} new_seen={n_total-n_seen} "
+            f"rejected={n_rejected} low_sev={n_low_sev} dedup={n_dedupe} "
+            f"→ fired_so_far={fired}")
 
     c["seen"] = list(seen)
     save_cursor(c)

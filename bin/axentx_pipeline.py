@@ -266,7 +266,10 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
         last_err = f"Gemini: {e} (after {last_err})"
 
     # Last resort: own Surrogate-1 v1 LoRA via ZeroGPU Space.
-    if os.environ.get("USE_V1_FALLBACK", "1") == "1":
+    # OFF by default (user directive 2026-05-02): "ไม่เอา surrogate-1 มาใช้
+    # เป็น fallback — มันยังไม่เก่ง ควรหา model ที่เก่งกว่าก่อนตลอด".
+    # Set USE_V1_FALLBACK=1 only when v1 quality matches/exceeds the chain.
+    if os.environ.get("USE_V1_FALLBACK", "0") == "1":
         try:
             full = (system + "\n\n" + prompt) if system else prompt
             return _call_surrogate_v1(full, timeout=max(timeout, 60))
@@ -278,20 +281,43 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
 def synthesize(prompt: str, system: str = "", n_attempts: int = 3,
                max_tokens: int = 1500, timeout: int = 30) -> str:
     """Generate N candidates, then call once more to synthesize the best.
-    Quality > raw call_llm at the cost of N+1 LLM credits."""
+    Quality > raw call_llm at the cost of N+1 LLM credits.
+
+    If all N candidates fail (every provider rate-limited), we degrade to a
+    single call_llm with a longer timeout instead of raising. Better a
+    single-attempt answer than nothing — pipeline keeps flowing.
+    """
     if n_attempts < 2:
         return call_llm(prompt, system, max_tokens, timeout)
-    cands = []
+    cands: list[str] = []
+    last_exc: Exception | None = None
     for _ in range(n_attempts):
-        try: cands.append(call_llm(prompt, system, max_tokens, timeout))
-        except Exception: continue
-    if not cands: raise RuntimeError("synthesize: no candidate succeeded")
-    if len(cands) == 1: return cands[0]
+        try:
+            cands.append(call_llm(prompt, system, max_tokens, timeout))
+        except Exception as e:
+            last_exc = e
+            continue
+    if not cands:
+        # Degraded path — try one more time with extended timeout. If THIS
+        # also fails, surface the original failure so debug logs stay clear.
+        try:
+            return call_llm(prompt, system, max_tokens, max(timeout * 2, 60))
+        except Exception:
+            raise RuntimeError(
+                f"synthesize: no candidate succeeded; last={last_exc}"
+            )
+    if len(cands) == 1:
+        return cands[0]
     sp = ("Synthesize the best parts of multiple AI proposals. Combine the "
           "strongest insights into ONE final answer. Resolve contradictions in "
           "favor of correctness + concrete actionability.\n\n" +
           "\n\n---\n\n".join(f"Candidate {i+1}:\n{c}" for i, c in enumerate(cands)))
-    return call_llm(sp, "", max_tokens, timeout)
+    try:
+        return call_llm(sp, "", max_tokens, timeout)
+    except Exception:
+        # Synthesis call itself rate-limited — return the first candidate
+        # rather than discarding all 2-3 successful generations.
+        return cands[0]
 
 
 
