@@ -18,7 +18,9 @@ log() { echo "[post-create $(date -u +%H:%M:%SZ)] $*"; }
 
 log "1/4 python deps"
 pip install --no-cache-dir -r requirements.txt
-pip install --no-cache-dir osv-scanner
+# Note: osv-scanner is a Go binary, not a PyPI package — skip in containers
+# without Go. Re-enable later via `go install github.com/google/osv-scanner/...@v1`
+# inside a feature that provisions Go.
 
 log "2/4 node deps"
 npm install -g wrangler@4 @commitlint/cli@19 @commitlint/config-conventional@19 @usebruno/cli
