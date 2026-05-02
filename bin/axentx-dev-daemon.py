@@ -280,4 +280,7 @@ def do_one_cycle() -> bool:
 
 
 if __name__ == "__main__":
-    daemon_loop("dev", NEW_TASK_INTERVAL, do_one_cycle)
+    # Per-worker role label so each @1..@6 instance has a unique heartbeat
+    # entry on /dash/agents (without it, all 6 collapse onto agent:dev).
+    role = f"dev-{os.environ.get('DEV_WORKER_ID', '1')}"
+    daemon_loop(role, NEW_TASK_INTERVAL, do_one_cycle)
