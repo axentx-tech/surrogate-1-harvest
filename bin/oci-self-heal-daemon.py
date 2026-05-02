@@ -39,6 +39,8 @@ SERVICES = {
     "axentx-incident-responder-daemon": "auto-fix GH/Render failures",
     "surrogate-state-sync-daemon": "5min state→git snapshot",
     "axentx-scheduled-runner-daemon": "always-on replacement for timers",
+    "axentx-pain-validator-daemon": "cross-source pain validation gate",
+    "axentx-skill-synthesizer-daemon": "auto-synth skills + papers from failure patterns",
 }
 
 

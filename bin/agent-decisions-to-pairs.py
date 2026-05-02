@@ -186,6 +186,75 @@ def extract_pairs(item: dict) -> list[dict]:
             "source": "axentx-agent-pipeline-verdict",
         })
 
+    # ── Flavor 4: Discovery-pipeline SFT (research/validator/bd/design/
+    #            business/marketing/prd) ────────────────────────────────
+    # Each stage emits one decision per item. Capture them all so v2
+    # learns the entire discovery loop end-to-end (not just dev→commit).
+    # Ref: docs/surrogate-1-v2-roadmap.md — capabilities #3-9.
+    discovery_stages = ("research", "validator", "bd", "design",
+                        "business", "marketing", "prd")
+    stage_prompts = {
+        "research": (
+            "You are mining a post for pain signal. Output strict JSON: "
+            "{is_real_pain, pain_one_liner, domain, severity, audience, evidence}."
+        ),
+        "validator": (
+            "Validate whether this pain is shared by multiple users with "
+            "evidence from neighbors. Output strict JSON validation verdict."
+        ),
+        "bd": (
+            "Triage this pain against the axentx product portfolio. Output "
+            "strict JSON: {verdict, target_project, rationale, ...}."
+        ),
+        "design": (
+            "Apply design thinking: 5-why root cause, jobs-to-be-done, "
+            "user archetype, constraints. Output strict JSON."
+        ),
+        "business": (
+            "Build the business model canvas (BMC) + pricing + north-star "
+            "metric. Output strict JSON."
+        ),
+        "marketing": (
+            "Draft positioning + ICP + competitor map + GTM plan. Strict JSON."
+        ),
+        "prd": (
+            "Decompose into PRD + epics + stories + tasks the dev pipeline "
+            "can implement. Strict JSON."
+        ),
+    }
+    for stage in discovery_stages:
+        entries = [h for h in history if h.get("stage") == stage]
+        for idx, entry in enumerate(entries):
+            response = entry.get("output", "") or ""
+            if not response or len(response) < 40:
+                continue
+            # Build the prompt: previous-stage outputs as context +
+            # stage-specific instruction.
+            ctx_pieces = []
+            for prev in discovery_stages:
+                if prev == stage:
+                    break
+                prev_entries = [h for h in history if h.get("stage") == prev]
+                if prev_entries:
+                    ctx_pieces.append(
+                        f"=== {prev} verdict ===\n"
+                        f"{(prev_entries[-1].get('output','') or '')[:1500]}"
+                    )
+            ctx = "\n\n".join(ctx_pieces) if ctx_pieces else "(no upstream context)"
+            out.append({
+                "flavor": f"sft-{stage}",
+                "id": f"{item_id}-{stage}-{idx}",
+                "prompt": (
+                    f"{stage_prompts.get(stage, '')}\n\n"
+                    f"=== upstream context ===\n{ctx[:6000]}\n\n"
+                    f"Produce the {stage}-stage decision."
+                ),
+                "response": response,
+                "project": project,
+                "stage": stage,
+                "source": f"axentx-discovery-{stage}",
+            })
+
     return out
 
 

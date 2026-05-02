@@ -552,7 +552,9 @@ def do_one_cycle() -> bool:
                 }],
                 "current": {"text": json.dumps(verdict, ensure_ascii=False)},
             }
-            write_item(item, "bd")  # next stage = BD triage
+            # next stage = pain-validator (cross-source confirmation gate);
+            # validator promotes to bd-queue or rejects to done/
+            write_item(item, "validator")
             log(f"research-{WORKER_ID}",
                 f"  ✓ pain (sev {verdict.get('severity')}, "
                 f"disc={discovery_id[:8]}): "
@@ -562,7 +564,7 @@ def do_one_cycle() -> bool:
         log(f"research-{WORKER_ID}",
             f"  source {name}: total={n_total} new_seen={n_total-n_seen} "
             f"rejected={n_rejected} low_sev={n_low_sev} dedup={n_dedupe} "
-            f"→ fired_so_far={fired}")
+            f"→ fired_so_far={fired} (→ validator-queue)")
 
     c["seen"] = list(seen)
     save_cursor(c)

@@ -41,13 +41,15 @@ QUEUES = {
     "qa":       SHARED / "qa-queue",
     "commit":   SHARED / "commit-queue",
     "done":     SHARED / "done",
-    # New product-discovery pipeline: research → bd → design → business → prd → dev
-    "research": SHARED / "research-queue",
-    "bd":       SHARED / "bd-queue",
-    "design":   SHARED / "design-queue",
-    "business": SHARED / "business-queue",
-    "marketing":SHARED / "marketing-queue",
-    "prd":      SHARED / "prd-queue",
+    # New product-discovery pipeline:
+    # research → validator → bd → design → business → marketing → prd → dev
+    "research":  SHARED / "research-queue",
+    "validator": SHARED / "validator-queue",
+    "bd":        SHARED / "bd-queue",
+    "design":    SHARED / "design-queue",
+    "business":  SHARED / "business-queue",
+    "marketing": SHARED / "marketing-queue",
+    "prd":       SHARED / "prd-queue",
 }
 LOG_DIR = REPO_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
