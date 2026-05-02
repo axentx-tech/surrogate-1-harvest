@@ -48,12 +48,17 @@ sys.path.insert(0, str(REPO_ROOT / "bin"))
 from axentx_pipeline import log  # noqa: E402
 
 # ── tunables ──────────────────────────────────────────────────────────────
-WORKERS = int(os.environ.get("MIRROR_WORKERS", "4"))
-PER_BATCH = int(os.environ.get("MIRROR_PER_BATCH", "300"))   # rows per lease
+# Defaults bumped 2026-05-02 round 4: user wants throughput pegged at the
+# HF datasets-server bucket cap, not whatever conservative default we had.
+# RATE_GAP_MS dropped 150 → 30: HF documents 1000 req/5min per token, we're
+# ~10 req/s at most so well under cap. Workers bumped per-VM via systemd
+# overrides (GCP=8, Kam=10).
+WORKERS = int(os.environ.get("MIRROR_WORKERS", "8"))
+PER_BATCH = int(os.environ.get("MIRROR_PER_BATCH", "500"))   # rows per lease (was 300)
 LEASE_TTL = int(os.environ.get("MIRROR_LEASE_TTL", "300"))   # 5 min
-RATE_GAP_MS = int(os.environ.get("MIRROR_RATE_GAP_MS", "150"))
-IDLE_BACKOFF_SEC = int(os.environ.get("MIRROR_IDLE_BACKOFF_SEC", "30"))
-ERROR_BACKOFF_SEC = int(os.environ.get("MIRROR_ERROR_BACKOFF_SEC", "60"))
+RATE_GAP_MS = int(os.environ.get("MIRROR_RATE_GAP_MS", "30"))  # was 150
+IDLE_BACKOFF_SEC = int(os.environ.get("MIRROR_IDLE_BACKOFF_SEC", "20"))
+ERROR_BACKOFF_SEC = int(os.environ.get("MIRROR_ERROR_BACKOFF_SEC", "45"))
 METRIC_INTERVAL_SEC = int(os.environ.get("MIRROR_METRIC_INTERVAL_SEC", "60"))
 
 PAIRS_FILE = REPO_ROOT / "state" / "training-pairs.jsonl"
@@ -230,6 +235,29 @@ SOURCES = [
 
     # Dialog
     ("OpenAssistant/oasst2",                    None, "train", "dialog-oasst",       _m_oasst,      None),
+
+    # ── added 2026-05-02 round 4 — bigger throughput surface ──────────────
+    # General instruction-following (large)
+    ("Open-Orca/SlimOrca",                      None, "train", "reasoning-slimorca", _m_chat_msgs,  150_000),
+    ("databricks/databricks-dolly-15k",         None, "train", "instr-dolly",        _m_alpaca,     None),
+    ("HuggingFaceH4/no_robots",                 None, "train_sft", "instr-no-robots", _m_chat_msgs, None),
+
+    # Code (more breadth)
+    ("bigcode/starcoderdata",                   "python", "train", "code-starcoder-py", _m_q_a,     200_000),
+    ("flytech/python-codes-25k",                None, "train", "code-py25k",         _m_alpaca,     None),
+    ("MBZUAI/LaMini-instruction",               None, "train", "instr-lamini",       _m_alpaca,     150_000),
+    ("HuggingFaceH4/CodeAlpaca_20K",            None, "train", "code-alpaca-h4",     _m_alpaca,     None),
+    ("ChrisHayduk/Llama-2-SQL-Dataset",         None, "train", "sql-llama2",         _m_q_a,        None),
+    ("smangrul/code-chat-assistant-v1",         None, "train", "code-chat-asst",     _m_chat_msgs,  None),
+
+    # DevOps / Infra-as-code (matches our actual stack)
+    ("Iam-Sankesh/Terraform-Code-Generation",   None, "train", "iac-terraform",      _m_q_a,        None),
+    ("dataset-bench/dockerfile-cleaning",       None, "train", "iac-dockerfile",     _m_q_a,        None),
+
+    # Math / reasoning
+    ("microsoft/orca-math-word-problems-200k",  None, "train", "math-orca-word",     _m_q_a,        None),
+    ("meta-math/MetaMathQA",                    None, "train", "math-metamath",      _m_q_a,        None),
+    ("cais/mmlu",                               "all", "auxiliary_train", "reasoning-mmlu", _m_q_a, 100_000),
 ]
 
 SOURCES_BY_ID = {f"{s[0]}|{s[1] or 'default'}|{s[2]}": s for s in SOURCES}

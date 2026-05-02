@@ -1,38 +1,30 @@
 #!/usr/bin/env bash
-# axentx-codespace-keepalive.sh — keeps the ollama LLM-proxy codespace warm
-# during business hours. Replaces the Mac-side LaunchAgent so the keepalive
-# survives laptop sleep/shutdown.
+# axentx-codespace-keepalive.sh — keeps the ENTIRE codespace LLM fleet warm
+# during business hours. Reads CS_FLEET (TSV: tok<TAB>name<TAB>account, one
+# per line) and pings every endpoint in turn.
 #
 # Account policy (2026-05-02):
-#   ashirap         — FORBIDDEN (AI free APIs + git clone 5000/h only)
+#   ashirap         — FORBIDDEN
 #   midnightcrisis  — quota exhausted this month
-#   ashirapit       — primary codespace owner. Pinned via GH_TOKEN env.
+#   ashirapit, midnightgts, luckyburster-lab, surrogate-1, axentx-tech,
+#   arkship-ai, ifusefreedomza — codespace-eligible. Each gets 60h/mo.
 #
 # Strategy:
-#   - During WORKING_HOURS_UTC (default 0:00–12:00 UTC, ≈ 7am–7pm Bangkok),
-#     ping every PING_SEC to keep warm.
-#   - Outside hours, no pings → codespace auto-stops at next 30 min idle.
+#   - During WORKING_HOURS_UTC (default 0–12 UTC ≈ 7am–7pm Bangkok), ping
+#     each endpoint every PING_SEC. Auto-start any that's not Available.
+#   - Outside hours: silent. Codespaces auto-stop at 30min idle.
+#   - Failure on one endpoint never blocks the rest (set +e in the loop).
 #
 # Required env:
-#   GH_TOKEN                 ashirapit PAT (codespace + workflow scopes)
-#   CS_NAME                  e.g. ollama-llm-proxy-r49955gvjxqv3ww4
-#   CODESPACE_LLM_URL        e.g. https://<CS_NAME>-11434.app.github.dev
-#
-# Soft-fail by design: a single 502 / transient gh-API hiccup must not
-# kill the keepalive (systemd would respawn it but we'd lose the loop's
-# implicit rate limiting). Just log + sleep + retry next tick.
+#   CS_FLEET                 multiline TSV "<token><TAB><cs-name><TAB><account>"
+#                            (CRLF / multiline both fine)
 set -u +e
 
-CS_NAME="${CS_NAME:-ollama-llm-proxy-r49955gvjxqv3ww4}"
+CS_FLEET="${CS_FLEET:-}"
 PING_SEC="${PING_SEC:-1200}"
 WHS="${WHS:-0}"
 WHE="${WHE:-12}"
-# Default to journal-only (systemd captures stdout). Override LOG_FILE if you
-# also want a file copy — must be in a path the service user can write to.
 LOG_FILE="${LOG_FILE:-}"
-if [ -n "$LOG_FILE" ]; then
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-fi
 
 log() {
     if [ -n "$LOG_FILE" ]; then
@@ -42,32 +34,32 @@ log() {
     fi
 }
 
-# `gh` reads GH_TOKEN env automatically — no `gh auth login` needed.
-if [ -z "${GH_TOKEN:-}" ]; then
-    log "FATAL: GH_TOKEN not set; cannot drive codespace API"
+if [ -z "$CS_FLEET" ]; then
+    log "FATAL: CS_FLEET env not set (multiline TSV: token<TAB>cs-name<TAB>account)"
     exit 1
 fi
-export GH_TOKEN
 
-log "start — keepalive for $CS_NAME (every ${PING_SEC}s, ${WHS}–${WHE} UTC)"
+# Number of codespaces in the fleet
+N=$(echo "$CS_FLEET" | grep -c '	')
+log "start — fleet keepalive over $N codespaces (every ${PING_SEC}s, ${WHS}–${WHE} UTC)"
 
 while true; do
     h=$(date -u +%H | sed 's/^0//')
     h=${h:-0}
     if [ "$h" -ge "$WHS" ] 2>/dev/null && [ "$h" -lt "$WHE" ] 2>/dev/null; then
-        state=$(gh codespace view -c "$CS_NAME" --json state -q .state 2>/dev/null || echo "unknown")
-        if [ "$state" != "Available" ]; then
-            log "  state=$state — starting"
-            start_msg=$(gh codespace start -c "$CS_NAME" 2>&1 | tail -1)
-            log "  start: ${start_msg:-no-output}"
-            sleep 20
-        fi
-        if [ -n "${CODESPACE_LLM_URL:-}" ]; then
-            r=$(curl -s -o /dev/null -w "%{http_code} %{time_total}s" -m 12 "$CODESPACE_LLM_URL/api/tags" 2>/dev/null || echo "fail")
-            log "  ping → $r"
-        else
-            log "  CODESPACE_LLM_URL unset — skipping"
-        fi
+        # Iterate fleet members. Each line: TOKEN \t CS_NAME \t ACCOUNT
+        echo "$CS_FLEET" | while IFS=$'\t' read -r tok name acct; do
+            [ -n "$tok" ] && [ -n "$name" ] || continue
+            url="https://${name}-11434.app.github.dev"
+            state=$(GH_TOKEN=$tok gh codespace view -c "$name" --json state -q .state 2>/dev/null || echo "unknown")
+            if [ "$state" != "Available" ]; then
+                log "  [$acct] state=$state — starting"
+                GH_TOKEN=$tok gh codespace start -c "$name" >/dev/null 2>&1
+                sleep 10
+            fi
+            r=$(curl -s -o /dev/null -w "%{http_code}/%{time_total}s" -m 12 "$url/api/tags" 2>/dev/null || echo "fail")
+            log "  [$acct/$name] $state → $r"
+        done
     else
         log "  outside hours (h=$h)"
     fi
