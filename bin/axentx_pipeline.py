@@ -183,54 +183,66 @@ def _cooldown(name: str, sec: float | None = None) -> None:
     _PROVIDER_COOLDOWN[name] = time.time() + sec
 
 
-def _call_codespace_ollama(messages: list, max_tokens: int, timeout: int) -> str:
-    """GH Codespace running ollama (Qwen2.5-Coder-7B 4-bit) — deepest free
-    fallback that doesn't depend on any external rate-limited provider.
+def _codespace_urls() -> list[str]:
+    """Returns the list of codespace ollama endpoints in priority order.
 
-    URL via env CODESPACE_LLM_URL (e.g.
-      https://ollama-llm-proxy-xxx-11434.app.github.dev). Codespace owner
-    sets the port visibility to 'public' once via gh CLI:
-      gh codespace ports visibility 11434:public -c <name>
-
-    Codespace auto-stops after 30min idle to preserve free quota. First
-    call after wake-up takes ~30-60s for container restart + model load;
-    subsequent calls are 2-5s.
+    Multi-codespace fleet (2026-05-02 round 2): each free GH account gets
+    60h/mo of codespace runtime. With 7 codespace-eligible accounts in
+    rotation we have ~420h/mo of LLM proxy capacity. Specify all of them
+    via CODESPACE_LLM_URLS (comma-separated) — pipeline picks the first
+    one whose cooldown is clear. Falls back to CODESPACE_LLM_URL (single)
+    for backwards compat.
     """
-    base = os.environ.get("CODESPACE_LLM_URL", "")
-    if not base:
-        raise RuntimeError("no CODESPACE_LLM_URL")
+    multi = os.environ.get("CODESPACE_LLM_URLS", "").strip()
+    if multi:
+        return [u.strip() for u in multi.split(",") if u.strip()]
+    single = os.environ.get("CODESPACE_LLM_URL", "").strip()
+    return [single] if single else []
+
+
+def _call_codespace_ollama(messages: list, max_tokens: int, timeout: int) -> str:
+    """Try each codespace endpoint in turn; first one whose per-URL cooldown
+    is clear gets the request. On failure, mark just that URL as cooling
+    and try the next — don't fail the whole call until ALL endpoints are
+    cooling.
+
+    URL list via env CODESPACE_LLM_URLS (comma-separated) or single
+    CODESPACE_LLM_URL. Each codespace runs ollama with the same model
+    (qwen2.5-coder:7b-instruct-q4_K_M) so requests are interchangeable.
+
+    Codespaces auto-stop after 30min idle to preserve the free quota.
+    First call after wake takes ~30-60s; subsequent calls are 2-5s.
+    """
+    urls = _codespace_urls()
+    if not urls:
+        raise RuntimeError("no CODESPACE_LLM_URLS")
     model = os.environ.get("CODESPACE_LLM_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
-    url = base.rstrip("/") + "/v1/chat/completions"
-    body = {"model": model, "messages": messages,
-            "max_tokens": max_tokens, "temperature": 0.3}
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": UA_BROWSER},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        d = json.loads(r.read())
-    return d["choices"][0]["message"]["content"]
-
-
-def _call_kamatera_ollama(messages: list, max_tokens: int, timeout: int) -> str:
-    """Kamatera VM running ollama (Qwen2.5-Coder-7B 5-bit). Only reachable
-    from the GCP egress IP via ufw — 2026-05-02 firewall rule. Different IP
-    family from codespace (private GH range) so a single AS-wide block on
-    GitHub does not also block this. Use as 2nd codespace fallback."""
-    base = os.environ.get("KAMATERA_LLM_URL", "")
-    if not base:
-        raise RuntimeError("no KAMATERA_LLM_URL")
-    model = os.environ.get("KAMATERA_LLM_MODEL", "qwen2.5-coder:7b-instruct-q5_K_M")
-    url = base.rstrip("/") + "/v1/chat/completions"
-    body = {"model": model, "messages": messages,
-            "max_tokens": max_tokens, "temperature": 0.3}
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": UA_BROWSER},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        d = json.loads(r.read())
-    return d["choices"][0]["message"]["content"]
+    last_err = "no endpoint tried"
+    for i, base in enumerate(urls):
+        provider_key = f"Codespace-LLM-{i}"
+        if not _provider_ready(provider_key):
+            continue
+        url = base.rstrip("/") + "/v1/chat/completions"
+        body = {"model": model, "messages": messages,
+                "max_tokens": max_tokens, "temperature": 0.3}
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": UA_BROWSER},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                d = json.loads(r.read())
+            return d["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            # 502 = codespace asleep; 429/503 = ollama overloaded. Different
+            # cooldowns: 502 short (codespace wakes in ~30s), 429 longer.
+            sec = 30 if e.code == 502 else _COOLDOWN_DEFAULT
+            _cooldown(provider_key, sec)
+            last_err = f"{provider_key}: HTTP {e.code}"
+        except Exception as e:
+            _cooldown(provider_key, 60)
+            last_err = f"{provider_key}: {type(e).__name__}: {str(e)[:60]}"
+    raise RuntimeError(f"all codespace endpoints down: {last_err}")
 
 
 def _hf_inference(messages: list, max_tokens: int, timeout: int,
@@ -382,31 +394,17 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 1500,
             _cooldown("HF-Inference", 60)
             last_err = f"HF-Inference: {e} (after {last_err})"
 
-    # Codespace ollama (Qwen2.5-Coder-7B 4-bit) — IP-distinct from CF/GCP,
-    # owns its own GPU-less budget. Used when everything above hits limits.
-    if _provider_ready("Codespace-LLM") and os.environ.get("CODESPACE_LLM_URL"):
+    # Codespace fleet — multiple ollama endpoints across free GH accounts.
+    # Each endpoint has its own per-URL cooldown so a single sleeping
+    # codespace doesn't poison the whole fleet. Round-robin internal to
+    # _call_codespace_ollama — only fails when ALL urls are cooling.
+    if _codespace_urls():
         try:
             return _call_codespace_ollama(messages, max_tokens, max(timeout, 60))
-        except urllib.error.HTTPError as e:
-            _cooldown("Codespace-LLM", _COOLDOWN_DEFAULT)
-            last_err = f"Codespace-LLM: HTTP {e.code} (after {last_err})"
+        except RuntimeError as e:
+            last_err = f"Codespace-fleet: {e} (after {last_err})"
         except Exception as e:
-            _cooldown("Codespace-LLM", 120)
-            last_err = f"Codespace-LLM: {e} (after {last_err})"
-
-    # Kamatera ollama (Qwen2.5-Coder-7B 5-bit, slightly higher quality than
-    # codespace's 4-bit). Independent VM, independent IP — used when codespace
-    # is mid-restart or has hit its 24h-keep-alive eviction. Internal-only:
-    # ufw on Kam allows port 11434 from GCP egress IP only.
-    if _provider_ready("Kamatera-LLM") and os.environ.get("KAMATERA_LLM_URL"):
-        try:
-            return _call_kamatera_ollama(messages, max_tokens, max(timeout, 60))
-        except urllib.error.HTTPError as e:
-            _cooldown("Kamatera-LLM", _COOLDOWN_DEFAULT)
-            last_err = f"Kamatera-LLM: HTTP {e.code} (after {last_err})"
-        except Exception as e:
-            _cooldown("Kamatera-LLM", 120)
-            last_err = f"Kamatera-LLM: {e} (after {last_err})"
+            last_err = f"Codespace-fleet: {type(e).__name__}: {str(e)[:80]} (after {last_err})"
 
     # Gemini (different API shape — handled separately)
     if _provider_ready("Gemini"):
